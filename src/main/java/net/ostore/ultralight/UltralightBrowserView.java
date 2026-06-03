@@ -232,7 +232,7 @@ public final class UltralightBrowserView {
     //  Tick (render thread, chaque frame)
     // =========================================================================
 
-    void onRendererTick() { paintSurface(); }
+    void onRendererTick() { paintSurface(); drainBridge(); }
 
     // =========================================================================
     //  Pipeline surface → NativeImageBackedTexture (mémoire native directe)
@@ -330,30 +330,54 @@ public final class UltralightBrowserView {
     }
 
     // =========================================================================
-    //  Pont JS↔Java — fonction native
+    //  Pont JS↔Java — par FILE (drainée à chaque frame)
     // =========================================================================
+    // Avec Luminescence 1.4, le callback natif d'un JSFunction ne se déclenche PAS pour les
+    // appels initiés par la page (seulement pour les appels Java via ctx.evaluate). On installe
+    // donc une fonction JS pure qui EMPILE les messages dans window.__ulq, et on DRAINE cette
+    // file côté Java à chaque onRendererTick via evaluate (qui, lui, fonctionne).
+
+    private static final String ULQ = "__ulq";
 
     private void installBridge() {
         try (JSContext ctx = view.acquireJSContextLock()) {
             String name = bridgeName;
-            ctx.globalObject().setProperty(name,
-                    JSFunction.create(ctx, name, (c, self, args) -> {
-                        dispatchQuery(args);
-                        return c.makeUndefined();
-                    }));
+            ctx.evaluate(
+                "window['" + name + "']=function(d){(window." + ULQ + "=window." + ULQ
+                + "||[]).push(String(d));};window." + ULQ + "=window." + ULQ + "||[];");
+            LOG.info("[ul-view:{}] pont JS installé (file) : window.{}", viewId, name);
         } catch (Throwable t) {
             LOG.warn("[ul-view:{}] Bridge install failed: {}", viewId, t.getMessage());
         }
     }
 
-    private void dispatchQuery(JSValue[] args) {
-        if (args == null || args.length == 0) return;
-        JSValue v = args[0];
-        if (v == null || v.isUndefined() || v.isNull()) return;
+    /** Dépile window.__ulq côté Java et dispatch chaque message au handler. Appelé chaque frame. */
+    private void drainBridge() {
         Consumer<String> handler = queryHandler;
         if (handler == null) return;
-        try { handler.accept(v.toString()); }
-        catch (Throwable t) { LOG.warn("[ul-view:{}] Bridge handler error: {}", viewId, t.getMessage()); }
+        String joined;
+        try (JSContext ctx = view.acquireJSContextLock()) {
+            // On (ré)installe le pont dans CE contexte (le monde JS vivant de la page) à chaque
+            // frame : à onWindowObjectReady, Luminescence 1.4 fournit un contexte qui est ensuite
+            // remplacé quand la page charge, si bien que window.<bridge> posée là n'atterrit pas
+            // dans le monde de la page. Le drain, lui, tape le contexte vivant — on y garantit donc
+            // la fonction pour que ses push aillent dans le même window.__ulq que celui qu'on draine.
+            String name = bridgeName;
+            JSValue r = ctx.evaluate("(function(){"
+                + "if(typeof window['" + name + "']!=='function')window['" + name
+                + "']=function(d){(window." + ULQ + "=window." + ULQ + "||[]).push(String(d));};"
+                + "var q=window." + ULQ + ";if(!q||!q.length)return '';window." + ULQ
+                + "=[];return q.join('\\u0001');})()");
+            joined = (r == null) ? null : r.toString();
+        } catch (Throwable t) {
+            return;
+        }
+        if (joined == null || joined.isEmpty()) return;
+        for (String msg : joined.split("")) {
+            if (msg.isEmpty()) continue;
+            try { handler.accept(msg); }
+            catch (Throwable t) { LOG.warn("[ul-view:{}] Bridge handler error: {}", viewId, t.getMessage()); }
+        }
     }
 
     // =========================================================================
