@@ -12,6 +12,9 @@
 # Jars Luminescence (API + natifs JNI) — voir README pour les obtenir
 /libs/
 
+# Packs de natifs assemblés (à héberger sur la release GitHub, pas dans le repo)
+/dist/
+
 # Divers
 *.class
 .DS_Store

@@ -1,0 +1,150 @@
+﻿2026-06-03T17:06:43.4082783Z ##[group]Run cmake --build build/cmake-build --config Release --parallel
+2026-06-03T17:06:43.4083520Z [36;1mcmake --build build/cmake-build --config Release --parallel[0m
+2026-06-03T17:06:43.4109828Z shell: /usr/bin/bash -e {0}
+2026-06-03T17:06:43.4110149Z env:
+2026-06-03T17:06:43.4110399Z   LUMINESCENCE_REF: v2026.1.0
+2026-06-03T17:06:43.4110726Z   ULTRALIGHT_SDK_VERSION: 1.4.0
+2026-06-03T17:06:43.4111136Z   JAVA_HOME: /opt/hostedtoolcache/Java_Zulu_jdk/17.0.19-10/x64
+2026-06-03T17:06:43.4111695Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Zulu_jdk/17.0.19-10/x64
+2026-06-03T17:06:43.4112152Z ##[endgroup]
+2026-06-03T17:06:43.4340544Z [  3%] Building CXX object CMakeFiles/LuminescenceJNI.dir/Adapters/ClipboardCallbackAdapter.cpp.o
+2026-06-03T17:06:43.4342045Z [  6%] Building CXX object CMakeFiles/LuminescenceJNI.dir/Adapters/FileSystemCallbackAdapter.cpp.o
+2026-06-03T17:06:43.4343262Z [ 10%] Building CXX object CMakeFiles/LuminescenceJNI.dir/Adapters/FontLoaderCallbackAdapter.cpp.o
+2026-06-03T17:06:43.4344767Z [ 13%] Building CXX object CMakeFiles/LuminescenceJNI.dir/Adapters/GPUDriverCallbackAdapter.cpp.o
+2026-06-03T17:06:43.4430989Z [ 16%] Building CXX object CMakeFiles/LuminescenceJNI.dir/Adapters/JSFunctionCallbackAdapter.cpp.o
+2026-06-03T17:06:43.4518111Z [ 23%] Building CXX object CMakeFiles/LuminescenceJNI.dir/Adapters/LoggerCallbackAdapter.cpp.o
+2026-06-03T17:06:43.4607077Z [ 23%] Building CXX object CMakeFiles/LuminescenceJNI.dir/Adapters/ViewCallbackAdapter.cpp.o
+2026-06-03T17:06:43.4705585Z [ 26%] Building CXX object CMakeFiles/LuminescenceJNI.dir/Core/CallbackAdapter.cpp.o
+2026-06-03T17:06:43.4856718Z [ 30%] Building CXX object CMakeFiles/LuminescenceJNI.dir/JNIBridge.cpp.o
+2026-06-03T17:06:43.5056939Z [ 33%] Building CXX object CMakeFiles/LuminescenceJNI.dir/JavaScript/JSCUtilities.cpp.o
+2026-06-03T17:06:43.5198057Z [ 36%] Building CXX object CMakeFiles/LuminescenceJNI.dir/JavaScript/JSArray.cpp.o
+2026-06-03T17:06:43.5311983Z [ 40%] Building CXX object CMakeFiles/LuminescenceJNI.dir/JavaScript/JSFunction.cpp.o
+2026-06-03T17:06:43.5487164Z [ 43%] Building CXX object CMakeFiles/LuminescenceJNI.dir/JavaScript/JSContext.cpp.o
+2026-06-03T17:06:43.5526577Z [ 46%] Building CXX object CMakeFiles/LuminescenceJNI.dir/JavaScript/JSObject.cpp.o
+2026-06-03T17:06:43.5581998Z [ 50%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULBuffer.cpp.o
+2026-06-03T17:06:43.5790455Z [ 53%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULConfig.cpp.o
+2026-06-03T17:06:43.5888993Z [ 56%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULImageSource.cpp.o
+2026-06-03T17:06:43.5938738Z [ 60%] Building CXX object CMakeFiles/LuminescenceJNI.dir/JavaScript/JSValue.cpp.o
+2026-06-03T17:06:43.6066032Z [ 63%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULGamepadEvent.cpp.o
+2026-06-03T17:06:43.6215204Z [ 66%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULBitmap.cpp.o
+2026-06-03T17:06:43.6464315Z [ 70%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULSession.cpp.o
+2026-06-03T17:06:43.6476466Z [ 73%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULPlatform.cpp.o
+2026-06-03T17:06:43.6636673Z [ 76%] Building CXX object CMakeFiles/LuminescenceJNI.dir/Ultralight.cpp.o
+2026-06-03T17:06:43.6747610Z [ 80%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULSurface.cpp.o
+2026-06-03T17:06:43.6869901Z [ 86%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULString.cpp.o
+2026-06-03T17:06:43.6891709Z [ 90%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULView.cpp.o
+2026-06-03T17:06:43.6966569Z [ 93%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULInputEvents.cpp.o
+2026-06-03T17:06:43.7018217Z [ 96%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULRenderer.cpp.o
+2026-06-03T17:06:43.7027662Z [ 83%] Building CXX object CMakeFiles/LuminescenceJNI.dir/ULViewConfig.cpp.o
+2026-06-03T17:06:45.8387277Z In file included from /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/ULView.cpp:6:
+2026-06-03T17:06:45.8539501Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Register(uintptr_t, Luminescence::ICallbackAdapter*)’:
+2026-06-03T17:06:45.8616858Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:25:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:45.8716553Z    25 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:45.8806341Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:45.8878572Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:11:1: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:45.8936365Z    10 | #include <unordered_map>
+2026-06-03T17:06:45.8996663Z   +++ |+#include <mutex>
+2026-06-03T17:06:45.9086450Z    11 | 
+2026-06-03T17:06:45.9178518Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Unregister(uintptr_t)’:
+2026-06-03T17:06:45.9237442Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:45.9296340Z    32 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:45.9386572Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:45.9478149Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.0703218Z In file included from /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Adapters/GPUDriverCallbackAdapter.cpp:2:
+2026-06-03T17:06:46.0768840Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Register(uintptr_t, Luminescence::ICallbackAdapter*)’:
+2026-06-03T17:06:46.0841299Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:25:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:46.0896795Z    25 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:46.0996967Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:46.1008728Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:11:1: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.1046396Z    10 | #include <unordered_map>
+2026-06-03T17:06:46.1076903Z   +++ |+#include <mutex>
+2026-06-03T17:06:46.1096361Z    11 | 
+2026-06-03T17:06:46.1108452Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Unregister(uintptr_t)’:
+2026-06-03T17:06:46.1137458Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:46.1166357Z    32 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:46.1186421Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:46.1207876Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.2287304Z In file included from /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Adapters/FontLoaderCallbackAdapter.cpp:6:
+2026-06-03T17:06:46.2378489Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Register(uintptr_t, Luminescence::ICallbackAdapter*)’:
+2026-06-03T17:06:46.2498051Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:25:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:46.2616767Z    25 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:46.2686547Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:46.2708523Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:11:1: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.2817869Z    10 | #include <unordered_map>
+2026-06-03T17:06:46.2936585Z   +++ |+#include <mutex>
+2026-06-03T17:06:46.2986279Z    11 | 
+2026-06-03T17:06:46.3103773Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Unregister(uintptr_t)’:
+2026-06-03T17:06:46.3106785Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:46.3276684Z    32 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:46.3366600Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:46.3369138Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.3517813Z In file included from /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Adapters/ClipboardCallbackAdapter.cpp:6:
+2026-06-03T17:06:46.3638654Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Register(uintptr_t, Luminescence::ICallbackAdapter*)’:
+2026-06-03T17:06:46.3667429Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:25:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:46.3776989Z    25 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:46.3806662Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:46.3950314Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:11:1: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.4016464Z    10 | #include <unordered_map>
+2026-06-03T17:06:46.4076389Z   +++ |+#include <mutex>
+2026-06-03T17:06:46.4106248Z    11 | 
+2026-06-03T17:06:46.4198077Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Unregister(uintptr_t)’:
+2026-06-03T17:06:46.4227754Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:46.4286360Z    32 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:46.4306316Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:46.4308607Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.4310830Z In file included from /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Adapters/FileSystemCallbackAdapter.cpp:6:
+2026-06-03T17:06:46.4313677Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Register(uintptr_t, Luminescence::ICallbackAdapter*)’:
+2026-06-03T17:06:46.4316638Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:25:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:46.4318024Z    25 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:46.4318560Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:46.4320477Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:11:1: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.4322455Z    10 | #include <unordered_map>
+2026-06-03T17:06:46.4322904Z   +++ |+#include <mutex>
+2026-06-03T17:06:46.4323280Z    11 | 
+2026-06-03T17:06:46.4325069Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Unregister(uintptr_t)’:
+2026-06-03T17:06:46.4327932Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:46.4329392Z    32 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:46.4329899Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:46.4417533Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.4419768Z In file included from /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Adapters/LoggerCallbackAdapter.cpp:6:
+2026-06-03T17:06:46.4422677Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Register(uintptr_t, Luminescence::ICallbackAdapter*)’:
+2026-06-03T17:06:46.4425331Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:25:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:46.4447108Z    25 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:46.4447663Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:46.4449606Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:11:1: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.4451143Z    10 | #include <unordered_map>
+2026-06-03T17:06:46.4451582Z   +++ |+#include <mutex>
+2026-06-03T17:06:46.4451972Z    11 | 
+2026-06-03T17:06:46.4453676Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h: In member function ‘void Luminescence::CCallbackAdapterRegistry::Unregister(uintptr_t)’:
+2026-06-03T17:06:46.4456494Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: error: ‘unique_lock’ is not a member of ‘std’
+2026-06-03T17:06:46.4458217Z    32 |             std::unique_lock Lock(m_Mutex);
+2026-06-03T17:06:46.4458924Z       |                  ^~~~~~~~~~~
+2026-06-03T17:06:46.4461408Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Core/CallbackAdapterRegistry.h:32:18: note: ‘std::unique_lock’ is defined in header ‘<mutex>’; did you forget to ‘#include <mutex>’?
+2026-06-03T17:06:46.4741961Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Adapters/GPUDriverCallbackAdapter.cpp: In static member function ‘static _jobject* Luminescence::CGPUDriverCallbackAdapter::BuildGPUState(JNIEnv*, const Luminescence::CGPUDriverCallbackAdapter*, const ULGPUState&)’:
+2026-06-03T17:06:46.4757685Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Adapters/GPUDriverCallbackAdapter.cpp:464:18: error: ‘copy_n’ is not a member of ‘std’; did you mean ‘copy’?
+2026-06-03T17:06:46.4776748Z   464 |             std::copy_n(GPUState.uniform_vector[i].value, 4, UniformVecFlat + i * 4);
+2026-06-03T17:06:46.4816362Z       |                  ^~~~~~
+2026-06-03T17:06:46.4876335Z       |                  copy
+2026-06-03T17:06:46.4917664Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/Adapters/GPUDriverCallbackAdapter.cpp:473:18: error: ‘copy_n’ is not a member of ‘std’; did you mean ‘copy’?
+2026-06-03T17:06:46.4920478Z   473 |             std::copy_n(GPUState.clip[i].data, 16, ClipFlat + i * 16);
+2026-06-03T17:06:46.4946395Z       |                  ^~~~~~
+2026-06-03T17:06:46.4976732Z       |                  copy
+2026-06-03T17:06:46.6751677Z gmake[2]: *** [CMakeFiles/LuminescenceJNI.dir/build.make:93: CMakeFiles/LuminescenceJNI.dir/Adapters/FileSystemCallbackAdapter.cpp.o] Error 1
+2026-06-03T17:06:46.6776620Z gmake[2]: *** Waiting for unfinished jobs....
+2026-06-03T17:06:46.7267334Z gmake[2]: *** [CMakeFiles/LuminescenceJNI.dir/build.make:121: CMakeFiles/LuminescenceJNI.dir/Adapters/GPUDriverCallbackAdapter.cpp.o] Error 1
+2026-06-03T17:06:46.7347065Z gmake[2]: *** [CMakeFiles/LuminescenceJNI.dir/build.make:443: CMakeFiles/LuminescenceJNI.dir/ULView.cpp.o] Error 1
+2026-06-03T17:06:46.7807940Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/ULString.cpp: In function ‘_jstring* ULStringGetData_Native(JNIEnv*, jclass, jlong)’:
+2026-06-03T17:06:46.7837141Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/ULString.cpp:111:18: error: ‘strlen’ was not declared in this scope
+2026-06-03T17:06:46.7856481Z   111 |     if (!Data || strlen(Data) == 0)
+2026-06-03T17:06:46.7876750Z       |                  ^~~~~~
+2026-06-03T17:06:46.7928034Z /home/runner/work/ultralight-fabric/ultralight-fabric/src/main/native/ULString.cpp:13:1: note: ‘strlen’ is defined in header ‘<cstring>’; did you forget to ‘#include <cstring>’?
+2026-06-03T17:06:46.7930585Z    12 | #include <locale>
+2026-06-03T17:06:46.7931323Z   +++ |+#include <cstring>
+2026-06-03T17:06:46.7931950Z    13 | #include <string>
+2026-06-03T17:06:46.7933239Z gmake[2]: *** [CMakeFiles/LuminescenceJNI.dir/build.make:107: CMakeFiles/LuminescenceJNI.dir/Adapters/FontLoaderCallbackAdapter.cpp.o] Error 1
+2026-06-03T17:06:46.7964836Z gmake[2]: *** [CMakeFiles/LuminescenceJNI.dir/build.make:79: CMakeFiles/LuminescenceJNI.dir/Adapters/ClipboardCallbackAdapter.cpp.o] Error 1
+2026-06-03T17:06:46.8361552Z gmake[2]: *** [CMakeFiles/LuminescenceJNI.dir/build.make:149: CMakeFiles/LuminescenceJNI.dir/Adapters/LoggerCallbackAdapter.cpp.o] Error 1
+2026-06-03T17:06:46.8550902Z gmake[2]: *** [CMakeFiles/LuminescenceJNI.dir/build.make:415: CMakeFiles/LuminescenceJNI.dir/ULString.cpp.o] Error 1
+2026-06-03T17:06:46.9423426Z gmake[1]: *** [CMakeFiles/Makefile2:87: CMakeFiles/LuminescenceJNI.dir/all] Error 2
+2026-06-03T17:06:46.9424511Z gmake: *** [Makefile:91: all] Error 2
+2026-06-03T17:06:46.9449475Z ##[error]Process completed with exit code 2.

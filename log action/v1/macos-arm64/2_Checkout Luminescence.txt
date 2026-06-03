@@ -1,0 +1,79 @@
+﻿2026-06-03T16:29:31.2257520Z ##[group]Run actions/checkout@v4
+2026-06-03T16:29:31.2258110Z with:
+2026-06-03T16:29:31.2258460Z   repository: Solomon-Team/Luminescence
+2026-06-03T16:29:31.2258860Z   ref: v2026.1.0
+2026-06-03T16:29:31.2262060Z   token: ***
+2026-06-03T16:29:31.2262380Z   ssh-strict: true
+2026-06-03T16:29:31.2262700Z   ssh-user: git
+2026-06-03T16:29:31.2263050Z   persist-credentials: true
+2026-06-03T16:29:31.2263420Z   clean: true
+2026-06-03T16:29:31.2263750Z   sparse-checkout-cone-mode: true
+2026-06-03T16:29:31.2264140Z   fetch-depth: 1
+2026-06-03T16:29:31.2264460Z   fetch-tags: false
+2026-06-03T16:29:31.2264840Z   show-progress: true
+2026-06-03T16:29:31.2265190Z   lfs: false
+2026-06-03T16:29:31.2265500Z   submodules: false
+2026-06-03T16:29:31.2265980Z   set-safe-directory: true
+2026-06-03T16:29:31.2266730Z env:
+2026-06-03T16:29:31.2267070Z   LUMINESCENCE_REF: v2026.1.0
+2026-06-03T16:29:31.2267450Z   ULTRALIGHT_SDK_VERSION: 1.4.0
+2026-06-03T16:29:31.2267840Z ##[endgroup]
+2026-06-03T16:29:31.3585460Z Syncing repository: Solomon-Team/Luminescence
+2026-06-03T16:29:31.3587300Z ##[group]Getting Git version info
+2026-06-03T16:29:31.3588040Z Working directory is '/Users/runner/work/ultralight-fabric/ultralight-fabric'
+2026-06-03T16:29:31.3589020Z [command]/opt/homebrew/bin/git version
+2026-06-03T16:29:31.3805230Z git version 2.54.0
+2026-06-03T16:29:31.3822350Z ##[endgroup]
+2026-06-03T16:29:31.3832140Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/b475f873-57f0-4190-9c8d-a613ca301e6e/.gitconfig'
+2026-06-03T16:29:31.3839300Z Temporarily overriding HOME='/Users/runner/work/_temp/b475f873-57f0-4190-9c8d-a613ca301e6e' before making global git config changes
+2026-06-03T16:29:31.3840440Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-03T16:29:31.3843130Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/ultralight-fabric/ultralight-fabric
+2026-06-03T16:29:31.3917440Z Deleting the contents of '/Users/runner/work/ultralight-fabric/ultralight-fabric'
+2026-06-03T16:29:31.3919870Z ##[group]Initializing the repository
+2026-06-03T16:29:31.3924080Z [command]/opt/homebrew/bin/git init /Users/runner/work/ultralight-fabric/ultralight-fabric
+2026-06-03T16:29:31.4099490Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-06-03T16:29:31.4100760Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-06-03T16:29:31.4101730Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-06-03T16:29:31.4102490Z hint: call:
+2026-06-03T16:29:31.4102970Z hint:
+2026-06-03T16:29:31.4103640Z hint: 	git config --global init.defaultBranch <name>
+2026-06-03T16:29:31.4104260Z hint:
+2026-06-03T16:29:31.4104870Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-06-03T16:29:31.4105740Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-06-03T16:29:31.4106520Z hint:
+2026-06-03T16:29:31.4107010Z hint: 	git branch -m <name>
+2026-06-03T16:29:31.4107550Z hint:
+2026-06-03T16:29:31.4108170Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-06-03T16:29:31.4109350Z Initialized empty Git repository in /Users/runner/work/ultralight-fabric/ultralight-fabric/.git/
+2026-06-03T16:29:31.4114590Z [command]/opt/homebrew/bin/git remote add origin https://github.com/Solomon-Team/Luminescence
+2026-06-03T16:29:31.4161880Z ##[endgroup]
+2026-06-03T16:29:31.4162650Z ##[group]Disabling automatic garbage collection
+2026-06-03T16:29:31.4164500Z [command]/opt/homebrew/bin/git config --local gc.auto 0
+2026-06-03T16:29:31.4206970Z ##[endgroup]
+2026-06-03T16:29:31.4207640Z ##[group]Setting up auth
+2026-06-03T16:29:31.4211350Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-03T16:29:31.4253370Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-03T16:29:31.4839490Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-06-03T16:29:31.4878040Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-06-03T16:29:31.5696190Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-06-03T16:29:31.5740440Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-06-03T16:29:31.6482960Z [command]/opt/homebrew/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-06-03T16:29:31.6524690Z ##[endgroup]
+2026-06-03T16:29:31.6525420Z ##[group]Fetching the repository
+2026-06-03T16:29:31.6526640Z [command]/opt/homebrew/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +refs/heads/v2026.1.0*:refs/remotes/origin/v2026.1.0* +refs/tags/v2026.1.0*:refs/tags/v2026.1.0*
+2026-06-03T16:29:32.4819550Z From https://github.com/Solomon-Team/Luminescence
+2026-06-03T16:29:32.4820510Z  * [new tag]         v2026.1.0  -> v2026.1.0
+2026-06-03T16:29:32.4877830Z ##[endgroup]
+2026-06-03T16:29:32.4878730Z ##[group]Determining the checkout info
+2026-06-03T16:29:32.4880840Z [command]/opt/homebrew/bin/git branch --list --remote origin/v2026.1.0
+2026-06-03T16:29:32.4935010Z [command]/opt/homebrew/bin/git tag --list v2026.1.0
+2026-06-03T16:29:32.4980830Z v2026.1.0
+2026-06-03T16:29:32.4983900Z ##[endgroup]
+2026-06-03T16:29:32.4986660Z [command]/opt/homebrew/bin/git sparse-checkout disable
+2026-06-03T16:29:32.5040750Z [command]/opt/homebrew/bin/git config --local --unset-all extensions.worktreeConfig
+2026-06-03T16:29:32.5083840Z ##[group]Checking out the ref
+2026-06-03T16:29:32.5087610Z [command]/opt/homebrew/bin/git checkout --progress --force refs/tags/v2026.1.0
+2026-06-03T16:29:32.5552230Z HEAD is now at 21c3ee2 Setup publishing to Maven Central
+2026-06-03T16:29:32.5856250Z ##[endgroup]
+2026-06-03T16:29:32.5997870Z [command]/opt/homebrew/bin/git log -1 --format=%H
+2026-06-03T16:29:32.6020160Z 21c3ee2847f1c551ebf30b752cb86141c7a1235e

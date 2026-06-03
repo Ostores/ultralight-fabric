@@ -1,0 +1,12 @@
+﻿2026-06-03T17:06:25.9935330Z ##[group]Run grep -rl 'static constexpr JNINativeMethod' src/main/native \
+2026-06-03T17:06:25.9935790Z [36;1mgrep -rl 'static constexpr JNINativeMethod' src/main/native \[0m
+2026-06-03T17:06:25.9936240Z [36;1m  | xargs perl -i -pe 's/static constexpr JNINativeMethod/static const JNINativeMethod/g'[0m
+2026-06-03T17:06:25.9936850Z [36;1mecho "tables restantes en constexpr : $(grep -rc 'static constexpr JNINativeMethod' src/main/native | grep -v ':0' | wc -l)"[0m
+2026-06-03T17:06:25.9981100Z shell: /bin/bash -e {0}
+2026-06-03T17:06:25.9981270Z env:
+2026-06-03T17:06:25.9981410Z   LUMINESCENCE_REF: v2026.1.0
+2026-06-03T17:06:25.9981600Z   ULTRALIGHT_SDK_VERSION: 1.4.0
+2026-06-03T17:06:25.9981900Z   JAVA_HOME: /Users/runner/hostedtoolcache/Java_Zulu_jdk/17.0.19-10/arm64/Contents/Home
+2026-06-03T17:06:25.9982370Z   JAVA_HOME_17_ARM64: /Users/runner/hostedtoolcache/Java_Zulu_jdk/17.0.19-10/arm64/Contents/Home
+2026-06-03T17:06:25.9982690Z ##[endgroup]
+2026-06-03T17:06:26.0622670Z tables restantes en constexpr :        0

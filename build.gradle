@@ -29,9 +29,9 @@ dependencies {
     // Luminescence — binding JNI Ultralight 1.4 (WebKit 615).
     // POC Windows : jars pré-buildés (API + natif win-x64) + icu4j (dépendance runtime).
     // Le SDK Ultralight 1.4 lui-même est extrait dans run/ultralight-1.4 (non bundlé ici).
-    implementation(files('libs/luminescence-2026.1.0.jar'))                       // API Java
-    // Tous les jars de natifs présents (windows-x64 fourni ; macos/linux via CI GitHub Actions).
-    implementation fileTree(dir: 'libs', include: ['luminescence-*-natives-*.jar'])
+    // API Java Luminescence (pure Java, embarquée). Les NATIFS (SDK Ultralight + JNI) ne sont
+    // PAS embarqués : ils sont téléchargés au 1er lancement par UltralightNativeLoader.
+    implementation(files('libs/luminescence-2026.1.0.jar'))
     implementation('com.ibm.icu:icu4j:78.3')
 }
 

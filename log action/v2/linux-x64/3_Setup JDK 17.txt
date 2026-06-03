@@ -1,0 +1,38 @@
+﻿2026-06-03T17:05:46.9195201Z ##[group]Run actions/setup-java@v4
+2026-06-03T17:05:46.9196670Z with:
+2026-06-03T17:05:46.9197398Z   distribution: zulu
+2026-06-03T17:05:46.9198189Z   java-version: 17
+2026-06-03T17:05:46.9198947Z   cache: gradle
+2026-06-03T17:05:46.9199700Z   java-package: jdk
+2026-06-03T17:05:46.9200483Z   check-latest: false
+2026-06-03T17:05:46.9201280Z   server-id: github
+2026-06-03T17:05:46.9202074Z   server-username: GITHUB_ACTOR
+2026-06-03T17:05:46.9203029Z   server-password: GITHUB_TOKEN
+2026-06-03T17:05:46.9203975Z   overwrite-settings: true
+2026-06-03T17:05:46.9204851Z   job-status: success
+2026-06-03T17:05:46.9216028Z   token: ***
+2026-06-03T17:05:46.9216772Z env:
+2026-06-03T17:05:46.9217485Z   LUMINESCENCE_REF: v2026.1.0
+2026-06-03T17:05:46.9218408Z   ULTRALIGHT_SDK_VERSION: 1.4.0
+2026-06-03T17:05:46.9219282Z ##[endgroup]
+2026-06-03T17:05:47.1516285Z ##[group]Installed distributions
+2026-06-03T17:05:47.1540820Z Trying to resolve the latest version from remote
+2026-06-03T17:05:47.2390245Z Resolved latest version as 17.0.19+10
+2026-06-03T17:05:47.2391013Z Trying to download...
+2026-06-03T17:05:47.2392196Z Downloading Java 17.0.19+10 (Zulu) from https://cdn.azul.com/zulu/bin/zulu17.66.19-ca-crac-jdk17.0.19-linux_x64.tar.gz ...
+2026-06-03T17:05:50.2680792Z Extracting Java archive...
+2026-06-03T17:05:50.2788812Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/0ac2c64a-068e-4dda-be55-67b319028af5 -f /home/runner/work/_temp/cccc5ead-3393-4391-983b-a497968a6c22
+2026-06-03T17:05:52.9655394Z Java 17.0.19+10 was downloaded
+2026-06-03T17:05:52.9656627Z Setting Java 17.0.19+10 as the default
+2026-06-03T17:05:52.9666568Z Creating toolchains.xml for JDK version 17 from zulu
+2026-06-03T17:05:52.9740894Z Writing to /home/runner/.m2/toolchains.xml
+2026-06-03T17:05:52.9741871Z 
+2026-06-03T17:05:52.9742474Z Java configuration:
+2026-06-03T17:05:52.9743184Z   Distribution: zulu
+2026-06-03T17:05:52.9743731Z   Version: 17.0.19+10
+2026-06-03T17:05:52.9744360Z   Path: /opt/hostedtoolcache/Java_Zulu_jdk/17.0.19-10/x64
+2026-06-03T17:05:52.9744892Z 
+2026-06-03T17:05:52.9745824Z ##[endgroup]
+2026-06-03T17:05:52.9760552Z Creating settings.xml with server-id: github
+2026-06-03T17:05:52.9769954Z Writing to /home/runner/.m2/settings.xml
+2026-06-03T17:05:53.2868134Z gradle cache is not found

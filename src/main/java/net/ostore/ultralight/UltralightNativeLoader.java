@@ -5,33 +5,44 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.List;
 import java.util.Locale;
-import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
- * Chargement des natifs Ultralight 1.4 via Luminescence.
+ * Chargement des natifs Ultralight 1.4 (SDK + pont JNI Luminescence) — <b>téléchargés au
+ * premier lancement</b> (façon MCEF), pas embarqués dans le jar.
  *
- * <p>Le SDK Ultralight 1.4 (bin/ + resources/) est <b>embarqué dans le jar</b> sous
- * {@code /ultralight-sdk/<platform>/} (avec un {@code manifest.txt}). Au premier lancement,
- * la plateforme courante est extraite dans {@code <gameDir>/ultralight-1.4/}, puis le pont
- * JNI {@code LuminescenceJNI} (embarqué dans le jar de natifs Luminescence) est chargé.
+ * <p>Au 1er run : détection de la plateforme → téléchargement de
+ * {@code ultralight-natives-<platform>.zip} (bin/ {UL libs + LuminescenceJNI} + resources/)
+ * depuis la release GitHub → dézippé dans {@code <gameDir>/ultralight-1.4/} → chargé.
+ * Idempotent (marqueur de version). Repli : si les natifs sont déjà présents (placés à la
+ * main), aucun téléchargement (pratique pour le dev hors-ligne).
  *
- * <p>Note licence : embarquer les binaires Ultralight = redistribution → prévoir le
- * {@code NOTICES} d'attribution (licence Ultralight Free).
+ * <p>Avantages : jar léger, multi-plateforme, et pas de redistribution des binaires Ultralight
+ * (le joueur les récupère et accepte la licence).
  */
 final class UltralightNativeLoader {
 
     private static final Logger LOG = LoggerFactory.getLogger("ultralight/loader");
 
-    static final String SDK_DIR_NAME   = "ultralight-1.4";
+    static final String SDK_DIR_NAME = "ultralight-1.4";
     private static final String SDK_VERSION = "1.4.0";
-    private static final String BUNDLE_BASE = "/ultralight-sdk/";
-    private static final String VERSION_FILE = ".ul-sdk-version";
+
+    /** Base de téléchargement des packs de natifs (release GitHub). Surchargeable via -D. */
+    private static final String RELEASE_BASE = System.getProperty(
+            "ultralight.natives.url",
+            "https://github.com/Ostores/ultralight-fabric/releases/download/natives-1.4.0/");
+
+    private static final String VERSION_FILE = ".ul-natives-version";
 
     private static volatile boolean loaded = false;
     private static Path loadedSdkDir = null;
@@ -42,8 +53,8 @@ final class UltralightNativeLoader {
     static boolean isLoaded() { return loaded; }
 
     /**
-     * Extrait le SDK 1.4 de la plateforme courante depuis le jar puis charge les natifs.
-     * @return la racine du SDK (contenant {@code resources/}) ou {@code null} en cas d'échec.
+     * Garantit la présence des natifs (téléchargement si besoin) puis les charge.
+     * @return racine du SDK (contenant {@code resources/}) ou {@code null} en cas d'échec.
      */
     static Path load() {
         if (loaded) return loadedSdkDir;
@@ -55,10 +66,16 @@ final class UltralightNativeLoader {
         }
 
         Path sdkDir = FabricLoader.getInstance().getGameDir().resolve(SDK_DIR_NAME);
-        if (!extractSdk(platform, sdkDir)) return null;
+        Path binDir = sdkDir.resolve("bin");
+        if (!ensureNatives(platform, sdkDir, binDir)) return null;
 
         try {
-            me.ayydxn.luminescence.internal.UltralightNativeLoader.load(sdkDir.resolve("bin").toAbsolutePath());
+            // Indique à Luminescence où trouver SON pont JNI (qu'on a téléchargé dans bin/).
+            Path jni = binDir.resolve(jniLibName(platform));
+            if (Files.isRegularFile(jni)) {
+                System.setProperty("ultralight.native.path", jni.toAbsolutePath().toString());
+            }
+            me.ayydxn.luminescence.internal.UltralightNativeLoader.load(binDir.toAbsolutePath());
         } catch (Throwable t) {
             LOG.error("[ul] Chargement des natifs Ultralight 1.4 / Luminescence échoué", t);
             return null;
@@ -70,49 +87,92 @@ final class UltralightNativeLoader {
         return sdkDir;
     }
 
-    /** Extrait les fichiers listés dans le manifeste de la plateforme. Idempotent (marqueur de version). */
-    private static boolean extractSdk(String platform, Path sdkDir) {
+    /** Télécharge + dézippe le pack si absent/obsolète. Repli : natifs déjà présents → OK. */
+    private static boolean ensureNatives(String platform, Path sdkDir, Path binDir) {
         Path marker = sdkDir.resolve(VERSION_FILE);
         String tag = SDK_VERSION + "-" + platform;
         try {
-            if (Files.isRegularFile(marker) && tag.equals(Files.readString(marker, StandardCharsets.UTF_8).trim()))
-                return true; // déjà extrait
+            if (Files.isRegularFile(marker)
+                    && tag.equals(Files.readString(marker, StandardCharsets.UTF_8).trim())
+                    && Files.isDirectory(binDir)) {
+                return true; // déjà installé
+            }
         } catch (Exception ignore) {}
 
-        String base = BUNDLE_BASE + platform + "/";
-        List<String> files;
-        try (InputStream in = UltralightNativeLoader.class.getResourceAsStream(base + "manifest.txt")) {
-            if (in == null) {
-                LOG.error("[ul] SDK 1.4 non embarqué pour {} (manifeste {}manifest.txt absent du jar).", platform, base);
-                return false;
-            }
-            files = new String(in.readAllBytes(), StandardCharsets.UTF_8)
-                    .lines().map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toList());
-        } catch (Exception e) {
-            LOG.error("[ul] Lecture manifeste SDK échouée", e);
-            return false;
+        // Repli dev : natifs placés à la main (UL libs + JNI présents) → pas de téléchargement.
+        if (Files.isRegularFile(binDir.resolve(jniLibName(platform)))) {
+            LOG.info("[ul] Natifs déjà présents dans {} — téléchargement ignoré.", binDir);
+            writeMarker(marker, tag);
+            return true;
         }
 
+        String url = RELEASE_BASE + "ultralight-natives-" + platform + ".zip";
+        LOG.info("[ul] Téléchargement des natifs Ultralight 1.4 [{}] depuis {} …", platform, url);
         try {
             Files.createDirectories(sdkDir);
-            for (String rel : files) {
-                Path dest = sdkDir.resolve(rel);
-                Files.createDirectories(dest.getParent());
-                try (InputStream in = UltralightNativeLoader.class.getResourceAsStream(base + rel)) {
-                    if (in == null) { LOG.error("[ul] Fichier SDK manquant dans le jar : {}{}", base, rel); return false; }
-                    Files.copy(in, dest, StandardCopyOption.REPLACE_EXISTING);
-                }
+            Path zip = Files.createTempFile("ul-natives-", ".zip");
+            try {
+                download(url, zip);
+                unzip(zip, sdkDir);
+            } finally {
+                Files.deleteIfExists(zip);
             }
-            Files.writeString(marker, tag, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            LOG.error("[ul] Extraction SDK 1.4 échouée", e);
+            if (!Files.isRegularFile(binDir.resolve(jniLibName(platform)))) {
+                LOG.error("[ul] Pack téléchargé invalide (JNI absent) pour {}.", platform);
+                return false;
+            }
+            writeMarker(marker, tag);
+            LOG.info("[ul] Natifs Ultralight 1.4 [{}] installés.", platform);
+            return true;
+        } catch (Throwable t) {
+            LOG.error("[ul] Téléchargement/extraction des natifs échoué ({}). "
+                    + "Vérifie ta connexion ou place les natifs dans {} manuellement.", t.getMessage(), binDir);
             return false;
         }
-        LOG.info("[ul] SDK Ultralight 1.4 [{}] extrait ({} fichiers).", platform, files.size());
-        return true;
     }
 
-    /** Doit correspondre aux dossiers /ultralight-sdk/<platform>/ et au loader Luminescence. */
+    private static void download(String url, Path dest) throws Exception {
+        HttpClient client = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url)).GET().build();
+        HttpResponse<Path> resp = client.send(req, HttpResponse.BodyHandlers.ofFile(dest));
+        if (resp.statusCode() != 200) {
+            throw new IllegalStateException("HTTP " + resp.statusCode() + " pour " + url);
+        }
+    }
+
+    /** Dézippe en se protégeant du zip-slip. */
+    private static void unzip(Path zip, Path destDir) throws Exception {
+        Path root = destDir.toAbsolutePath().normalize();
+        try (InputStream fin = Files.newInputStream(zip);
+             ZipInputStream zin = new ZipInputStream(fin)) {
+            ZipEntry e;
+            while ((e = zin.getNextEntry()) != null) {
+                Path out = root.resolve(e.getName()).normalize();
+                if (!out.startsWith(root)) throw new IllegalStateException("Zip slip: " + e.getName());
+                if (e.isDirectory()) {
+                    Files.createDirectories(out);
+                } else {
+                    Files.createDirectories(out.getParent());
+                    Files.copy(zin, out, StandardCopyOption.REPLACE_EXISTING);
+                }
+                zin.closeEntry();
+            }
+        }
+    }
+
+    private static void writeMarker(Path marker, String tag) {
+        try { Files.writeString(marker, tag, StandardCharsets.UTF_8); } catch (Exception ignore) {}
+    }
+
+    private static String jniLibName(String platform) {
+        if (platform.startsWith("windows")) return "LuminescenceJNI.dll";
+        if (platform.startsWith("macos"))   return "libLuminescenceJNI.dylib";
+        return "libLuminescenceJNI.so";
+    }
+
+    /** Doit correspondre aux noms de packs et au loader Luminescence. */
     private static String detectPlatform() {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);

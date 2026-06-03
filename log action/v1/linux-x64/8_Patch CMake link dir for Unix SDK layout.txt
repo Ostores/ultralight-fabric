@@ -1,0 +1,13 @@
+﻿2026-06-03T16:30:22.7222015Z ##[group]Run f=src/main/native/CMakeLists.txt
+2026-06-03T16:30:22.7222626Z [36;1mf=src/main/native/CMakeLists.txt[0m
+2026-06-03T16:30:22.7223341Z [36;1msed 's#${ULTRALIGHT_SDK}/lib#${ULTRALIGHT_SDK}/bin#' "$f" > "$f.tmp" && mv "$f.tmp" "$f"[0m
+2026-06-03T16:30:22.7224045Z [36;1mgrep UL_LIB_DIR "$f"[0m
+2026-06-03T16:30:22.7263369Z shell: /usr/bin/bash -e {0}
+2026-06-03T16:30:22.7263800Z env:
+2026-06-03T16:30:22.7264131Z   LUMINESCENCE_REF: v2026.1.0
+2026-06-03T16:30:22.7264590Z   ULTRALIGHT_SDK_VERSION: 1.4.0
+2026-06-03T16:30:22.7265121Z   JAVA_HOME: /opt/hostedtoolcache/Java_Zulu_jdk/17.0.19-10/x64
+2026-06-03T16:30:22.7265821Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Zulu_jdk/17.0.19-10/x64
+2026-06-03T16:30:22.7266633Z ##[endgroup]
+2026-06-03T16:30:22.7373068Z set(UL_LIB_DIR "${ULTRALIGHT_SDK}/bin")   # adjust to SDK layout
+2026-06-03T16:30:22.7373817Z target_link_directories(LuminescenceJNI PRIVATE ${UL_LIB_DIR})
