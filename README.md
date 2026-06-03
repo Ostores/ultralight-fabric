@@ -37,12 +37,16 @@ si la version change).
 ## Build (développeurs)
 
 ```bash
-# 1. Place l'API Luminescence (compile-time) dans libs/ :
-#    libs/luminescence-2026.1.0.jar   (depuis les releases Luminescence)
-./gradlew build
+# 1. Place l'API Luminescence dans libs/ :  libs/luminescence-2026.1.0.jar
+#    (depuis les releases Luminescence)
+# 2. Installe-la dans le Maven local (requise pour le jar-in-jar) :
+scripts/install-luminescence.ps1     # Windows   (ou: bash scripts/install-luminescence.sh)
+# 3. Build :
+./gradlew build                      # → build/libs/ultralight-1.0.jar (~14 Mo, autonome)
 ```
 
-Les natifs ne sont **pas** nécessaires pour compiler (ils sont récupérés au runtime).
+Le jar embarque l'API Luminescence (LGPL) + icu4j en **jar-in-jar**. Les natifs ne sont **pas**
+nécessaires pour compiler (récupérés au runtime).
 Pour lancer en dev : `./gradlew runClient` (les natifs se téléchargent, ou place-les à la main).
 
 ### Régénérer les packs de natifs

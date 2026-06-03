@@ -9,6 +9,7 @@
     "sources": "https://github.com/Ostores/ultralight-fabric"
   },
   "license": "MIT",
+  "icon": "assets/ultralight/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": [

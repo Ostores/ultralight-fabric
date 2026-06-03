@@ -18,6 +18,7 @@ loom {
 
 repositories {
     mavenCentral()
+    mavenLocal()   // API Luminescence (io.github.ayydxn:luminescence) installée localement
 }
 
 dependencies {
@@ -26,13 +27,19 @@ dependencies {
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 
-    // Luminescence — binding JNI Ultralight 1.4 (WebKit 615).
-    // POC Windows : jars pré-buildés (API + natif win-x64) + icu4j (dépendance runtime).
-    // Le SDK Ultralight 1.4 lui-même est extrait dans run/ultralight-1.4 (non bundlé ici).
-    // API Java Luminescence (pure Java, embarquée). Les NATIFS (SDK Ultralight + JNI) ne sont
-    // PAS embarqués : ils sont téléchargés au 1er lancement par UltralightNativeLoader.
-    implementation(files('libs/luminescence-2026.1.0.jar'))
+    // API Java Luminescence (LGPL-3.0) + icu4j : jar-in-jar (`include`) → nested, séparables
+    // (LGPL-clean). Voir docs/Building pour installer l'API Luminescence en mavenLocal.
+    implementation('io.github.ayydxn:luminescence:2026.1.0')
+    include('io.github.ayydxn:luminescence:2026.1.0')
     implementation('com.ibm.icu:icu4j:78.3')
+    include('com.ibm.icu:icu4j:78.3')
+    // Les NATIFS (SDK Ultralight + pont JNI) ne sont PAS embarqués : téléchargés au runtime.
+}
+
+// Embarque l'attribution dans le jar (licence Ultralight Free : attribution requise).
+processResources {
+    from("NOTICES.md")
+    from("LICENSE")
 }
 
 def targetJavaVersion = 21
