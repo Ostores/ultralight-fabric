@@ -1,0 +1,103 @@
+name: Build Luminescence natives (Mac/Linux)
+
+# Compile le natif JNI de Luminescence (LuminescenceJNI) pour les plateformes Unix,
+# contre le SDK Ultralight 1.4.0, et empaquette chaque natif dans un jar au format
+# attendu par le loader Luminescence : /natives/<platform>/<lib>.
+#
+# Windows n'est PAS buildé ici (le jar officiel windows-x64 existe déjà, et VS 2026
+# n'est pas dispo sur les runners GitHub-hosted).
+#
+# Lancement : onglet Actions → "Build Luminescence natives (Mac/Linux)" → Run workflow.
+# Récupère ensuite les 3 artefacts et dépose-les dans libs/ du mod.
+
+on:
+  workflow_dispatch:
+
+env:
+  LUMINESCENCE_REF: "v2026.1.0"          # doit correspondre à la version du jar API utilisé
+  ULTRALIGHT_SDK_VERSION: "1.4.0"
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            sdk_asset: ultralight-free-sdk-1.4.0-linux-x64.7z
+            lib: libLuminescenceJNI.so
+          - platform: macos-x64
+            runner: macos-13
+            sdk_asset: ultralight-free-sdk-1.4.0-mac-x64.7z
+            lib: libLuminescenceJNI.dylib
+          - platform: macos-arm64
+            runner: macos-14
+            sdk_asset: ultralight-free-sdk-1.4.0-mac-arm64.7z
+            lib: libLuminescenceJNI.dylib
+
+    steps:
+      - name: Checkout Luminescence
+        uses: actions/checkout@v4
+        with:
+          repository: Solomon-Team/Luminescence
+          ref: ${{ env.LUMINESCENCE_REF }}
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+          cache: gradle
+
+      - name: Install 7-Zip (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: Install 7-Zip (macOS)
+        if: runner.os == 'macOS'
+        run: brew install sevenzip
+
+      - name: Download Ultralight 1.4 SDK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ultralight-sdk"
+          gh release download "$ULTRALIGHT_SDK_VERSION" \
+            --repo Ayydxn/Voxellight-Ultralight-SDKs \
+            --pattern "${{ matrix.sdk_asset }}" \
+            --output "$RUNNER_TEMP/sdk.7z"
+          if command -v 7z >/dev/null 2>&1; then 7z x "$RUNNER_TEMP/sdk.7z" -o"$RUNNER_TEMP/ultralight-sdk" -y;
+          else 7zz x "$RUNNER_TEMP/sdk.7z" -o"$RUNNER_TEMP/ultralight-sdk" -y; fi
+
+      - name: Generate JNI headers
+        run: ./gradlew generateJniHeaders --no-daemon
+
+      - name: CMake configure
+        run: |
+          cmake -S src/main/native -B build/cmake-build \
+            -DJNI_HEADER_DIR="$(pwd)/build/jni-headers" \
+            -DULTRALIGHT_SDK="$RUNNER_TEMP/ultralight-sdk" \
+            -DPLATFORM="${{ matrix.platform }}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLUMINESCENCE_TRACY=OFF \
+            -G "Unix Makefiles"
+
+      - name: CMake build
+        run: cmake --build build/cmake-build --config Release --parallel
+
+      - name: Package natives jar
+        run: |
+          ROOT="$RUNNER_TEMP/jar/natives/${{ matrix.platform }}"
+          mkdir -p "$ROOT"
+          cp "build/cmake-build/${{ matrix.lib }}" "$ROOT/"
+          (cd "$RUNNER_TEMP/jar" && jar --create --file "$RUNNER_TEMP/luminescence-2026.1.0-natives-${{ matrix.platform }}.jar" .)
+
+      - name: Upload natives jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: luminescence-natives-${{ matrix.platform }}
+          path: ${{ runner.temp }}/luminescence-2026.1.0-natives-${{ matrix.platform }}.jar
+          if-no-files-found: error

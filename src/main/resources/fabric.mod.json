@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "ultralight",
+  "version": "1.0",
+  "name": "Ultralight API",
+  "description": "Ultralight web rendering engine for Fabric mods (abysse API mod)",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "net.ostore.ultralight.UltralightApiClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.14",
+    "fabric-api": "*",
+    "minecraft": "~1.21.11"
+  }
+}

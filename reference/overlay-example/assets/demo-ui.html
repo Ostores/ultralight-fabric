@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<!-- DEMO VITRINE Ultralight 1.4 / WebKit 615 — supprimable avec UltralightDemoScreen.java -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --accent: #7c5cff;
+    --accent2: #00d4ff;
+    --card-bg: rgba(255, 255, 255, 0.10);
+    --text: #f4f5ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 100%; height: 100%; font-family: "Segoe UI", sans-serif; color: var(--text);
+               -webkit-user-select: none; overflow: hidden; }
+  /* Fond statique coloré — pour bien voir le flou backdrop-filter par-dessus.
+     (Pas d'animation continue : en CPU mode, animer tout l'écran force un repaint
+      complet par frame → lag. On laisse les transitions au survol uniquement.) */
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(120deg, #ff5f6d, #7c5cff 45%, #00d4ff 85%, #21d4fd);
+  }
+
+  /* FROSTED GLASS — impossible sur WebKit 608, marche en 615 (-webkit-) */
+  .card {
+    width: 560px; padding: 28px 32px; border-radius: 20px;
+    background: var(--card-bg);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    backdrop-filter: blur(14px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.25);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+  }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  h1 span { background: linear-gradient(90deg, var(--accent2), #fff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .sub { opacity: .8; font-size: 13px; margin-bottom: 18px; }
+
+  /* FLEX GAP — était cassé en 608 */
+  .chips { display: flex; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  /* Survols INSTANTANÉS (pas de transition) : en CPU mode + backdrop-filter, une transition
+     anime un flux de repaints qui reblurent le verre dépoli à chaque frame → lag.
+     Un :hover instantané = un seul repaint. */
+  .chip { padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,0.16);
+          font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+  .chip:hover { background: var(--accent); }
+  /* pastille verte dessinée en CSS (pas de glyphe → pas de tofu) */
+  .chip::before { content: ''; width: 9px; height: 9px; border-radius: 50%;
+                  background: #38e08a; box-shadow: 0 0 6px #38e08a; }
+
+  .showcase { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+  .tile { background: rgba(0,0,0,0.18); border-radius: 12px; padding: 10px; font-size: 11px; text-align: center; }
+  .tile small { opacity: .7; display: block; margin-top: 6px; }
+
+  /* ASPECT-RATIO — nouveau en 615 */
+  .ar { aspect-ratio: 16 / 9; border-radius: 8px;
+        background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  /* RADIAL-GRADIENT (conic-gradient n'est pas rendu par ce build 615) */
+  .pie { width: 100%; aspect-ratio: 1; border-radius: 50%;
+         background: radial-gradient(circle at 35% 35%, #fff, var(--accent2) 35%, var(--accent) 75%, #ff5f6d); }
+  /* CLIP-PATH — nouveau en 615 */
+  .hex { width: 100%; aspect-ratio: 1; background: linear-gradient(135deg, #fff, var(--accent2));
+         -webkit-clip-path: polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+         clip-path: polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%); }
+
+  .row { display: flex; gap: 12px; align-items: center; }
+  button { cursor: pointer; border: none; border-radius: 10px; padding: 12px 16px; font-size: 15px; color: #fff;
+           background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  button:hover { filter: brightness(1.12); }
+  input { flex: 1; cursor: text; padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.3);
+          background: rgba(0,0,0,0.25); color: #fff; font-size: 14px; }
+  #echo { margin-top: 8px; font-size: 13px; min-height: 16px; color: var(--accent2); }
+  .count { font-weight: 700; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Ultralight <span>1.4 · WebKit 615</span></h1>
+    <div class="sub">Fonctionnalités CSS impossibles sur l'ancien moteur (608)</div>
+
+    <div class="chips">
+      <div class="chip">flex gap</div>
+      <div class="chip">backdrop-filter</div>
+      <div class="chip">aspect-ratio</div>
+      <div class="chip">clip-path</div>
+      <div class="chip">var()</div>
+    </div>
+
+    <div class="showcase">
+      <div class="tile"><div class="ar"></div><small>aspect-ratio 16:9</small></div>
+      <div class="tile"><div class="pie"></div><small>radial-gradient</small></div>
+      <div class="tile"><div class="hex"></div><small>clip-path</small></div>
+    </div>
+
+    <div class="row">
+      <button id="inc">Clics : <span id="c" class="count">0</span></button>
+      <input id="field" type="text" placeholder="tape ici pour tester la saisie…">
+    </div>
+    <div id="echo"></div>
+  </div>
+<script>
+  function q(d){ if (window.abysseQuery) window.abysseQuery(d); }
+  var n = 0, cEl = document.getElementById('c');
+  document.getElementById('inc').addEventListener('click', function(){ cEl.textContent = (++n); q('click:' + n); });
+  var f = document.getElementById('field'), echo = document.getElementById('echo');
+  f.addEventListener('input', function(){ echo.textContent = 'saisi : ' + f.value; q('input:' + f.value); });
+</script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+buildscript {
+    repositories { mavenCentral() }
+    dependencies {
+        classpath 'org.apache.commons:commons-compress:1.26.2'
+        classpath 'org.tukaani:xz:1.9'
+    }
+}
+
+plugins {
+    id 'fabric-loom' version '1.16-SNAPSHOT'
+    id 'maven-publish'
+}
+
+version = project.mod_version
+group   = project.maven_group
+
+base { archivesName = project.archives_base_name }
+
+loom {
+    mods {
+        "ultralight" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+// ─── Ultralight SDK — embarqué dans le JAR (win + mac + linux x64) ───────────
+// Commit b8daecd = version exacte compilée dans ultralight-java-base:0.4.12.
+
+def UL_COMMIT   = 'b8daecd'
+def UL_CDN      = 'https://ultralight-sdk.sfo2.cdn.digitaloceanspaces.com/'
+def UL_CACHE    = file("${gradle.gradleUserHomeDir}/caches/ultralight/${UL_COMMIT}")
+def UL_OUT      = file("${buildDir}/ultralight-natives")
+def UL_PLATFORM = [win: 'windows', mac: 'macos', linux: 'linux']
+
+task downloadUltralightSdk {
+    doNotTrackState("Téléchargement réseau — présence des archives gérée manuellement")
+    doLast {
+        UL_CACHE.mkdirs()
+        UL_PLATFORM.keySet().each { os ->
+            def name = "ultralight-sdk-${UL_COMMIT}-${os}-x64.7z"
+            def dest = new File(UL_CACHE, name)
+            if (dest.exists()) { println "[ul] ${name} déjà en cache."; return }
+            println "[ul] Téléchargement ${name}..."
+            def conn = new URL("${UL_CDN}${name}").openConnection()
+            conn.connectTimeout = 15_000; conn.readTimeout = 600_000
+            dest.withOutputStream { out -> conn.inputStream.withCloseable { it.transferTo(out) } }
+            println "[ul] ${name} OK."
+        }
+    }
+}
+
+task extractUltralightNatives {
+    dependsOn downloadUltralightSdk
+    outputs.dir(UL_OUT)
+    doLast {
+        UL_PLATFORM.each { os, folder ->
+            def archive = new File(UL_CACHE, "ultralight-sdk-${UL_COMMIT}-${os}-x64.7z")
+            def dest    = new File(UL_OUT, "${folder}-x64")
+            dest.mkdirs()
+            def files = []
+            def sz = org.apache.commons.compress.archivers.sevenz.SevenZFile.builder().setFile(archive).get()
+            try {
+                def entry
+                while ((entry = sz.nextEntry) != null) {
+                    if (entry.directory) continue
+                    def n = entry.name.replace('\\' as char, '/' as char)
+                    boolean inBin = n.contains('/bin/') || n.startsWith('bin/')
+                    boolean inRes = n.contains('/resources/') || n.startsWith('resources/')
+                    if (!inBin && !inRes) continue
+                    String fn
+                    if (inBin) {
+                        // fichiers natifs : plat (juste le nom)
+                        fn = n.substring(n.lastIndexOf('/') + 1)
+                    } else {
+                        // icudt67l.dat, cacert.pem → conserver le préfixe resources/
+                        int idx = n.indexOf('resources/')
+                        fn = n.substring(idx)
+                    }
+                    if (fn.isEmpty()) continue
+                    def destFile = new File(dest, fn)
+                    destFile.parentFile.mkdirs()
+                    destFile.withOutputStream { out -> sz.getInputStream(entry).withCloseable { it.transferTo(out) } }
+                    files << fn
+                }
+            } finally { sz.close() }
+            new File(dest, 'manifest.txt').text = files.join('\n')
+            println "[ul] ${os}: ${files.size()} fichiers → ${dest.name}"
+        }
+    }
+}
+
+processResources {
+    dependsOn extractUltralightNatives
+    from(UL_OUT) { into('ultralight-natives') }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings  "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    // Bridge JNI ultralight-java + SDK bundled dans ce mod
+    include implementation("com.labymedia:ultralight-java-base:0.4.12")
+    include implementation('org.apache.commons:commons-compress:1.26.2')
+    include implementation('org.tukaani:xz:1.9')
+}
+
+def targetJavaVersion = 21
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
+        it.options.release.set(targetJavaVersion)
+    }
+}
+
+java {
+    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
+    if (JavaVersion.current() < javaVersion) {
+        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    withSourcesJar()
+}
+
+// Publication Maven locale — abysse référence ce mod via mavenLocal()
+// Publie aussi le -dev.jar (intermediary) que Loom utilise pour la compilation côté dépendant.
+publishing {
+    publications {
+        create("mavenJava", MavenPublication) {
+            groupId    = project.maven_group
+            artifactId = project.archives_base_name
+            version    = project.mod_version
+
+            artifact(remapJar) { builtBy remapJar }
+            artifact(jar)      { builtBy jar; classifier "dev" }
+            artifact(sourcesJar) { builtBy remapSourcesJar; classifier "sources" }
+        }
+    }
+    repositories {
+        mavenLocal()
+    }
+}

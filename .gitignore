@@ -1,0 +1,17 @@
+# Build / IDE / run
+/build/
+/.gradle/
+/run/
+.idea/
+*.iml
+*.hs_err_pid*.log
+
+# Binaires non versionnés (fournis localement / par le build du jar de release)
+# SDK Ultralight 1.4 propriétaire (embarqué dans le jar Modrinth, PAS dans le repo)
+/src/main/resources/ultralight-sdk/
+# Jars Luminescence (API + natifs JNI) — voir README pour les obtenir
+/libs/
+
+# Divers
+*.class
+.DS_Store

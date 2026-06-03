@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; font-family: sans-serif; background: #1a1a1a; color: #eee; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .flexgap { display: flex; gap: 12px; }
+  .flexgap > div { width: 20px; height: 20px; background: #4af; }
+</style>
+</head>
+<body>
+<!-- Probes comportementales : mesurées en JS, pas seulement déclarées supportées -->
+<div id="grid" class="grid"><div>a</div><div>b</div></div>
+<div id="flexgap" class="flexgap"><div></div><div></div></div>
+<script>
+(function () {
+  var supports = (typeof CSS !== 'undefined' && CSS.supports)
+    ? function (p, v) { try { return CSS.supports(p, v); } catch (e) { return false; } }
+    : function () { return 'no-CSS.supports'; };
+
+  // --- Déclaratif (CSS.supports) ---
+  var decl = {
+    'display:grid'           : supports('display', 'grid'),
+    'gap (flex/grid)'        : supports('gap', '8px'),
+    'row-gap'                : supports('row-gap', '8px'),
+    'aspect-ratio'           : supports('aspect-ratio', '1 / 1'),
+    'position:sticky'        : supports('position', 'sticky'),
+    'backdrop-filter'        : supports('backdrop-filter', 'blur(4px)'),
+    '-webkit-backdrop-filter': supports('-webkit-backdrop-filter', 'blur(4px)'),
+    'filter'                 : supports('filter', 'blur(4px)'),
+    'clip-path'              : supports('clip-path', 'circle(50%)'),
+    'mask'                   : supports('mask', 'url(#m)'),
+    '-webkit-mask'           : supports('-webkit-mask', 'url(#m)'),
+    'transform'              : supports('transform', 'translateX(1px)'),
+    'transform-3d'           : supports('transform', 'translateZ(1px)'),
+    'transition'             : supports('transition', 'all 1s'),
+    'object-fit'             : supports('object-fit', 'cover'),
+    ':has()'                 : supports('selector(:has(*))'),
+    'var()'                  : supports('--x', '0') && supports('color', 'var(--x)'),
+    'calc()'                 : supports('width', 'calc(1px + 1%)'),
+    'conic-gradient'         : supports('background', 'conic-gradient(#000, #fff)'),
+    'inset'                  : supports('inset', '0'),
+    'overflow:clip'          : supports('overflow', 'clip'),
+    'gap (flex specific)'    : supports('column-gap', '1px')
+  };
+
+  // --- Comportemental : on mesure réellement le layout ---
+  function rect(id) { return document.getElementById(id).getBoundingClientRect(); }
+  var beh = {};
+  try {
+    // Grid : les 2 cellules doivent être côte à côte (même top, x différents)
+    var g = document.getElementById('grid').children;
+    var r0 = g[0].getBoundingClientRect(), r1 = g[1].getBoundingClientRect();
+    beh['grid lays out 2 cols'] = Math.abs(r0.top - r1.top) < 2 && r1.left > r0.left + 10;
+  } catch (e) { beh['grid lays out 2 cols'] = 'err:' + e.message; }
+  try {
+    // Flex gap : le 2e enfant doit être décalé de ~32px (20 + 12 gap), pas 20px
+    var f = document.getElementById('flexgap').children;
+    var f0 = f[0].getBoundingClientRect(), f1 = f[1].getBoundingClientRect();
+    beh['flex gap adds space'] = (f1.left - f0.left) > 28; // 20 collé = 20 ; avec gap = 32
+  } catch (e) { beh['flex gap adds space'] = 'err:' + e.message; }
+
+  var report = {
+    userAgent: navigator.userAgent,
+    declared: decl,
+    behavioral: beh
+  };
+
+  // Sortie : repérable par le ViewListener côté Java via le préfixe.
+  console.log('CSS-PROBE-RESULT ' + JSON.stringify(report));
+
+  // Test du pont JS→Java natif (fix Phase 1) : doit revenir côté Java.
+  if (typeof window.abysseQuery === 'function') {
+    window.abysseQuery('PROBE-BRIDGE-OK');
+    console.log('CSS-PROBE bridge: abysseQuery present, called.');
+  } else {
+    console.log('CSS-PROBE bridge: abysseQuery MISSING');
+  }
+})();
+</script>
+</body>
+</html>
