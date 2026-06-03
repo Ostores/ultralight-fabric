@@ -1,20 +1,23 @@
-name: Build Luminescence natives (Mac/Linux)
+name: Build & publish Ultralight natives (Mac/Linux)
 
-# Compile le natif JNI de Luminescence (LuminescenceJNI) pour les plateformes Unix,
-# contre le SDK Ultralight 1.4.0, et empaquette chaque natif dans un jar au format
-# attendu par le loader Luminescence : /natives/<platform>/<lib>.
+# Compile le pont JNI Luminescence pour Linux/macOS contre le SDK Ultralight 1.4.0,
+# assemble un PACK prêt à l'emploi (bin/ {libs Ultralight + LuminescenceJNI} + resources/),
+# et le PUBLIE automatiquement sur la release `natives-1.4.0` (téléchargée au runtime par le mod).
 #
-# Windows n'est PAS buildé ici (le jar officiel windows-x64 existe déjà, et VS 2026
-# n'est pas dispo sur les runners GitHub-hosted).
+# Windows n'est pas buildé ici (VS 2026 absent des runners GitHub-hosted) : le pack
+# `ultralight-natives-windows-x64.zip` est assemblé localement et uploadé à la main sur la
+# même release.
 #
-# Lancement : onglet Actions → "Build Luminescence natives (Mac/Linux)" → Run workflow.
-# Récupère ensuite les 3 artefacts et dépose-les dans libs/ du mod.
+# Lancement : onglet Actions → ce workflow → Run workflow.
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write   # pour créer/mettre à jour la release des natifs
+
 env:
-  LUMINESCENCE_REF: "v2026.1.0"          # doit correspondre à la version du jar API utilisé
+  LUMINESCENCE_REF: "v2026.1.0"
   ULTRALIGHT_SDK_VERSION: "1.4.0"
 
 jobs:
@@ -29,10 +32,6 @@ jobs:
             runner: ubuntu-24.04
             sdk_asset: ultralight-free-sdk-1.4.0-linux-x64.7z
             lib: libLuminescenceJNI.so
-          - platform: macos-x64
-            runner: macos-13
-            sdk_asset: ultralight-free-sdk-1.4.0-mac-x64.7z
-            lib: libLuminescenceJNI.dylib
           - platform: macos-arm64
             runner: macos-14
             sdk_asset: ultralight-free-sdk-1.4.0-mac-arm64.7z
@@ -77,28 +76,22 @@ jobs:
           chmod +x ./gradlew
           ./gradlew generateJniHeaders --no-daemon
 
-      # Sur Unix, les libs Ultralight (.so/.dylib) sont dans bin/, pas lib/ (où le CMake
-      # de Luminescence pointe par défaut, valable seulement pour les .lib Windows).
+      # Sur Unix, les libs Ultralight sont dans bin/, pas lib/ (où le CMake pointe par défaut).
       - name: Patch CMake link dir for Unix SDK layout
         run: |
           f=src/main/native/CMakeLists.txt
           sed 's#${ULTRALIGHT_SDK}/lib#${ULTRALIGHT_SDK}/bin#' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
-          grep UL_LIB_DIR "$f"
 
-      # Bug source Luminescence : `static constexpr JNINativeMethod[]` exige une constant
-      # expression, mais (void*)(function-ptr) n'en est pas une pour GCC/Clang (MSVC tolère).
-      # constexpr -> const (init dynamique, comportement identique). Corrige les 19 tables.
+      # `static constexpr JNINativeMethod[]` { (void*)func } n'est pas une constant expression
+      # pour GCC/Clang (MSVC tolère). constexpr -> const (init dynamique, identique).
       - name: Patch source for GCC/Clang (non-constexpr JNI tables)
         run: |
           grep -rl 'static constexpr JNINativeMethod' src/main/native \
             | xargs perl -i -pe 's/static constexpr JNINativeMethod/static const JNINativeMethod/g'
-          echo "tables restantes en constexpr : $(grep -rc 'static constexpr JNINativeMethod' src/main/native | grep -v ':0' | wc -l)"
 
       - name: CMake configure
         run: |
-          # Luminescence ne compile que sous MSVC (headers std implicites). Sur GCC/Clang,
-          # on force-include les en-têtes standard manquants dans chaque unité de compilation
-          # (corrige std::size/unique_lock/copy_n/strlen… sans toucher au source).
+          # Source MSVC-only : force-include des en-têtes std manquants (size/unique_lock/strlen…).
           FORCE_INCLUDES="-include cstddef -include cstdint -include cstring -include cstdio -include cmath -include string -include vector -include array -include algorithm -include iterator -include mutex -include memory -include functional -include stdexcept"
           cmake -S src/main/native -B build/cmake-build \
             -DJNI_HEADER_DIR="$(pwd)/build/jni-headers" \
@@ -112,16 +105,43 @@ jobs:
       - name: CMake build
         run: cmake --build build/cmake-build --config Release --parallel
 
-      - name: Package natives jar
+      # Pack runtime : bin/ {libs Ultralight + LuminescenceJNI} + resources/ (icudt, cacert).
+      - name: Assemble natives pack
         run: |
-          ROOT="$RUNNER_TEMP/jar/natives/${{ matrix.platform }}"
-          mkdir -p "$ROOT"
-          cp "build/cmake-build/${{ matrix.lib }}" "$ROOT/"
-          (cd "$RUNNER_TEMP/jar" && jar --create --file "$RUNNER_TEMP/luminescence-2026.1.0-natives-${{ matrix.platform }}.jar" .)
+          PACK="$RUNNER_TEMP/pack"
+          mkdir -p "$PACK/bin" "$PACK/resources"
+          cp "$RUNNER_TEMP"/ultralight-sdk/bin/* "$PACK/bin/"
+          cp "build/cmake-build/${{ matrix.lib }}" "$PACK/bin/"
+          cp "$RUNNER_TEMP"/ultralight-sdk/resources/* "$PACK/resources/"
+          ( cd "$PACK" && zip -r "$RUNNER_TEMP/ultralight-natives-${{ matrix.platform }}.zip" bin resources )
+          echo "Pack bin/:"; ls -la "$PACK/bin"
 
-      - name: Upload natives jar
+      - name: Upload pack artifact
         uses: actions/upload-artifact@v4
         with:
-          name: luminescence-natives-${{ matrix.platform }}
-          path: ${{ runner.temp }}/luminescence-2026.1.0-natives-${{ matrix.platform }}.jar
+          name: ultralight-natives-${{ matrix.platform }}
+          path: ${{ runner.temp }}/ultralight-natives-${{ matrix.platform }}.zip
           if-no-files-found: error
+
+  publish:
+    name: Publish packs to release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download all packs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ultralight-natives-*
+          path: packs
+          merge-multiple: true
+
+      - name: Upload to release natives-1.4.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la packs
+          gh release view natives-1.4.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create natives-1.4.0 --repo "$GITHUB_REPOSITORY" \
+                 --title "Ultralight 1.4 natives" \
+                 --notes "Per-platform native packs (Ultralight 1.4 SDK + LuminescenceJNI), downloaded at runtime by the mod. Windows pack uploaded manually."
+          gh release upload natives-1.4.0 --repo "$GITHUB_REPOSITORY" packs/*.zip --clobber
