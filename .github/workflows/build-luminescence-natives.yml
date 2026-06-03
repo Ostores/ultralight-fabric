@@ -85,6 +85,15 @@ jobs:
           sed 's#${ULTRALIGHT_SDK}/lib#${ULTRALIGHT_SDK}/bin#' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
           grep UL_LIB_DIR "$f"
 
+      # Bug source Luminescence : `static constexpr JNINativeMethod[]` exige une constant
+      # expression, mais (void*)(function-ptr) n'en est pas une pour GCC/Clang (MSVC tolère).
+      # constexpr -> const (init dynamique, comportement identique). Corrige les 19 tables.
+      - name: Patch source for GCC/Clang (non-constexpr JNI tables)
+        run: |
+          grep -rl 'static constexpr JNINativeMethod' src/main/native \
+            | xargs perl -i -pe 's/static constexpr JNINativeMethod/static const JNINativeMethod/g'
+          echo "tables restantes en constexpr : $(grep -rc 'static constexpr JNINativeMethod' src/main/native | grep -v ':0' | wc -l)"
+
       - name: CMake configure
         run: |
           cmake -S src/main/native -B build/cmake-build \
