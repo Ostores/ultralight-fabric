@@ -1,57 +1,66 @@
 # ultralight-fabric
 
 Mod-API **Fabric** (client, Minecraft 1.21.11) qui rend du **HTML / CSS / JS** dans une texture
-Minecraft via **[Ultralight](https://ultralig.ht) 1.4 (WebKit 615)**, exposé pour être consommé
-par d'autres mods.
+Minecraft via **[Ultralight](https://ultralig.ht) 1.4 (WebKit 615 ≈ Safari 16.4)**, exposé pour
+être consommé par d'autres mods.
 
 Pensé comme un wrapper **léger** (faible empreinte mémoire) pour des overlays / UIs web in-game —
-là où une solution Chromium (MCEF) serait beaucoup plus lourde.
+là où une solution Chromium (MCEF) serait bien plus lourde.
+
+> 📖 Documentation complète : **[Wiki](../../wiki)** · API détaillée : **[docs/API.md](docs/API.md)** · exemple : **[reference/overlay-example/](reference/overlay-example/)**
 
 ## État
 
 | | |
 |---|---|
-| Moteur | Ultralight **1.4.0** / WebKit **615** (≈ Safari 16.4) via le binding [Luminescence](https://github.com/Solomon-Team/Luminescence) |
-| Windows x64 | ✅ fonctionnel (rendu, pont JS, input souris/clavier, curseurs) |
-| macOS / Linux | 🚧 natifs à builder en CI (`.github/workflows/build-luminescence-natives.yml`) |
+| Moteur | Ultralight **1.4.0** / WebKit **615** via le binding [Luminescence](https://github.com/Solomon-Team/Luminescence) |
+| Plateformes | ✅ Windows x64 · ✅ Linux x64 · ✅ macOS arm64 *(Intel mac : non encore packagé)* |
 | Rendu | CPU mode → texture MC (BGRA prémultiplié → RGBA straight-alpha, copie native) |
+| Natifs | **téléchargés au 1er lancement** (façon MCEF), pas embarqués → jar léger (~14 Mo) |
 
-CSS moderne disponible (WebKit 615) : grid, flexbox `gap`, `aspect-ratio`, `clip-path`,
-`-webkit-backdrop-filter`, `var()`, transitions… (`conic-gradient` et `:has()` non rendus par ce build).
+CSS moderne (WebKit 615) : grid, flexbox `gap`, `aspect-ratio`, `clip-path`,
+`-webkit-backdrop-filter`, `var()`, transitions, `inset`, `overflow:clip`…
+*Non rendus par ce build : `conic-gradient`, `:has()`.*
 
-## Build
+## Comment ça marche (natifs)
 
-Le repo ne contient **pas** les binaires (sources seules). Pour builder localement :
+Le jar du mod **ne contient pas** le SDK Ultralight ni le pont JNI. Au premier lancement,
+`UltralightNativeLoader` détecte la plateforme et **télécharge** le pack correspondant
+(`ultralight-natives-<platform>.zip` = SDK Ultralight 1.4 + `LuminescenceJNI`) depuis la
+[release `natives-1.4.0`](../../releases/tag/natives-1.4.0), le dézippe dans
+`<gameDir>/ultralight-1.4/`, puis le charge. C'est mis en cache (re-téléchargement uniquement
+si la version change).
 
-1. **Binding Luminescence** — placer dans `libs/` :
-   - `luminescence-2026.1.0.jar` (API) + `luminescence-2026.1.0-natives-<platform>.jar` (JNI),
-     depuis les [releases Luminescence](https://github.com/Solomon-Team/Luminescence/releases)
-     (ou produits par le workflow CI pour macOS/Linux).
-2. **SDK Ultralight 1.4 Free** — extraire l'archive de la plateforme
-   ([mirror](https://github.com/Ayydxn/Voxellight-Ultralight-SDKs/releases) ou
-   [ultralig.ht](https://ultralig.ht)) dans :
-   ```
-   src/main/resources/ultralight-sdk/<platform>/
-     ├── bin/          (UltralightCore, WebCore, Ultralight, AppCore)
-     ├── resources/    (icudt67l.dat, cacert.pem)
-     └── manifest.txt  (liste des fichiers ci-dessus, chemins relatifs)
-   ```
-   `<platform>` ∈ `windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`.
-3. `./gradlew build`
+- Base de téléchargement surchargeable : `-Dultralight.natives.url=<url/>`.
+- Dev hors-ligne : place les natifs dans `<gameDir>/ultralight-1.4/bin` → le téléchargement est ignoré.
 
-Au 1er lancement, le mod extrait le SDK de la plateforme courante dans `<gameDir>/ultralight-1.4/`
-puis charge les natifs.
+## Build (développeurs)
 
-## Utilisation (API)
+```bash
+# 1. Place l'API Luminescence (compile-time) dans libs/ :
+#    libs/luminescence-2026.1.0.jar   (depuis les releases Luminescence)
+./gradlew build
+```
 
-Voir **[docs/API.md](docs/API.md)** (moteur, vue, pont JS `window.ulQuery`, input, curseurs,
-recette d'overlay réactif) et l'exemple complet dans **[reference/overlay-example/](reference/overlay-example/)**.
+Les natifs ne sont **pas** nécessaires pour compiler (ils sont récupérés au runtime).
+Pour lancer en dev : `./gradlew runClient` (les natifs se téléchargent, ou place-les à la main).
+
+### Régénérer les packs de natifs
+Les packs Linux/macOS sont produits et publiés automatiquement par le workflow
+**`.github/workflows/build-luminescence-natives.yml`** (Actions → Run workflow). Le pack
+Windows est assemblé localement (VS 2026 indisponible sur les runners GitHub) et uploadé à la main
+sur la release `natives-1.4.0`.
+
+## API (mods consommateurs)
+
+Entrée : `UltralightEngine.init()` (dans `onInitializeClient`), puis `UltralightBrowserView`
+(loadHTML/URL, pont JS `window.ulQuery`, input souris/clavier, curseurs). Pont JS configurable via
+`UltralightBrowserView.setBridgeName(...)`. Détails + recette d'overlay réactif : **[docs/API.md](docs/API.md)**.
 
 ## Licences
 
-- **Code de ce mod** : [MIT](LICENSE). Voir aussi [NOTICES.md](NOTICES.md).
-- **Ultralight** : SDK propriétaire, licence [Ultralight Free](https://ultralig.ht/pricing)
-  (gratuit < 100 k$ de CA/financement, PC, usage applicatif, **attribution requise**).
-  Les binaires ne sont pas redistribués dans ce repo ; le jar de release les embarque.
-- **Luminescence** : LGPL-3.0.
-- **icu4j** : licence Unicode.
+- **Code de ce mod** : [MIT](LICENSE) — voir [NOTICES.md](NOTICES.md) pour les tiers.
+- **Ultralight** : SDK propriétaire, [licence Free](https://ultralig.ht/pricing) (gratuit < 100 k$
+  de CA/financement, PC, usage applicatif, **attribution requise**). Binaires non redistribués par
+  ce repo — téléchargés depuis la release au runtime.
+- **Luminescence** : LGPL-3.0 · **icu4j** : licence Unicode.
