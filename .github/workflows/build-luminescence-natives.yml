@@ -73,7 +73,17 @@ jobs:
           else 7zz x "$RUNNER_TEMP/sdk.7z" -o"$RUNNER_TEMP/ultralight-sdk" -y; fi
 
       - name: Generate JNI headers
-        run: ./gradlew generateJniHeaders --no-daemon
+        run: |
+          chmod +x ./gradlew
+          ./gradlew generateJniHeaders --no-daemon
+
+      # Sur Unix, les libs Ultralight (.so/.dylib) sont dans bin/, pas lib/ (où le CMake
+      # de Luminescence pointe par défaut, valable seulement pour les .lib Windows).
+      - name: Patch CMake link dir for Unix SDK layout
+        run: |
+          f=src/main/native/CMakeLists.txt
+          sed 's#${ULTRALIGHT_SDK}/lib#${ULTRALIGHT_SDK}/bin#' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          grep UL_LIB_DIR "$f"
 
       - name: CMake configure
         run: |
