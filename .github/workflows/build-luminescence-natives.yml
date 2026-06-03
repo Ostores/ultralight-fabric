@@ -96,12 +96,17 @@ jobs:
 
       - name: CMake configure
         run: |
+          # Luminescence ne compile que sous MSVC (headers std implicites). Sur GCC/Clang,
+          # on force-include les en-têtes standard manquants dans chaque unité de compilation
+          # (corrige std::size/unique_lock/copy_n/strlen… sans toucher au source).
+          FORCE_INCLUDES="-include cstddef -include cstdint -include cstring -include cstdio -include cmath -include string -include vector -include array -include algorithm -include iterator -include mutex -include memory -include functional -include stdexcept"
           cmake -S src/main/native -B build/cmake-build \
             -DJNI_HEADER_DIR="$(pwd)/build/jni-headers" \
             -DULTRALIGHT_SDK="$RUNNER_TEMP/ultralight-sdk" \
             -DPLATFORM="${{ matrix.platform }}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DLUMINESCENCE_TRACY=OFF \
+            -DCMAKE_CXX_FLAGS="$FORCE_INCLUDES" \
             -G "Unix Makefiles"
 
       - name: CMake build
