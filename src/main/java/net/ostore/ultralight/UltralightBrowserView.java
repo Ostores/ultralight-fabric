@@ -42,11 +42,19 @@ import java.util.function.IntConsumer;
  * texture MC RGBA straight-alpha, via un buffer natif que l'on possède) et le mapping d'input
  * sont identiques à la version 1.3 ; seuls les appels au moteur passent par l'API Luminescence.
  *
- * <p>Pont JS : {@code window.abysseQuery(data)} (fonction native via {@link JSFunction}).
+ * <p>Pont JS : {@code window.ulQuery(data)} (fonction native via {@link JSFunction} ;
+ * nom configurable via {@link #setBridgeName}).
  */
 public final class UltralightBrowserView {
 
-    private static final Logger LOG = LoggerFactory.getLogger("abysse/ul-view");
+    private static final Logger LOG = LoggerFactory.getLogger("ultralight/view");
+
+    /** Nom de la fonction JS du pont (côté page : {@code window.<name>(data)}). Défaut neutre. */
+    private static volatile String bridgeName = "ulQuery";
+    /** Change le nom global de la fonction de pont JS (prend effet aux prochains chargements de page). */
+    public static void setBridgeName(String name) {
+        if (name != null && !name.isEmpty()) bridgeName = name;
+    }
 
     /** recip[a] ≈ (255/a) << 16 — dé-prémultiplication sans division par pixel. */
     private static final int[] UNPREMULT_RECIP = new int[256];
@@ -327,8 +335,9 @@ public final class UltralightBrowserView {
 
     private void installBridge() {
         try (JSContext ctx = view.acquireJSContextLock()) {
-            ctx.globalObject().setProperty("abysseQuery",
-                    JSFunction.create(ctx, "abysseQuery", (c, self, args) -> {
+            String name = bridgeName;
+            ctx.globalObject().setProperty(name,
+                    JSFunction.create(ctx, name, (c, self, args) -> {
                         dispatchQuery(args);
                         return c.makeUndefined();
                     }));

@@ -14,7 +14,7 @@ import org.slf4j.LoggerFactory;
  */
 final class UltralightDemo {
 
-    private static final Logger LOG = LoggerFactory.getLogger("abysse/ul-demo");
+    private static final Logger LOG = LoggerFactory.getLogger("ultralight/demo");
 
     private UltralightDemo() {}
 

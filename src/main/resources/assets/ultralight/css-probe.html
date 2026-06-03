@@ -71,11 +71,11 @@
   console.log('CSS-PROBE-RESULT ' + JSON.stringify(report));
 
   // Test du pont JS→Java natif (fix Phase 1) : doit revenir côté Java.
-  if (typeof window.abysseQuery === 'function') {
-    window.abysseQuery('PROBE-BRIDGE-OK');
-    console.log('CSS-PROBE bridge: abysseQuery present, called.');
+  if (typeof window.ulQuery === 'function') {
+    window.ulQuery('PROBE-BRIDGE-OK');
+    console.log('CSS-PROBE bridge: ulQuery present, called.');
   } else {
-    console.log('CSS-PROBE bridge: abysseQuery MISSING');
+    console.log('CSS-PROBE bridge: ulQuery MISSING');
   }
 })();
 </script>

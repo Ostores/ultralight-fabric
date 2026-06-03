@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class UltralightEngine {
 
-    private static final Logger LOG = LoggerFactory.getLogger("abysse/ul-engine");
+    private static final Logger LOG = LoggerFactory.getLogger("ultralight/engine");
 
     private static volatile boolean ready = false;
     private static boolean initAttempted = false;

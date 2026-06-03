@@ -97,7 +97,7 @@
     <div id="echo"></div>
   </div>
 <script>
-  function q(d){ if (window.abysseQuery) window.abysseQuery(d); }
+  function q(d){ if (window.ulQuery) window.ulQuery(d); }
   var n = 0, cEl = document.getElementById('c');
   document.getElementById('inc').addEventListener('click', function(){ cEl.textContent = (++n); q('click:' + n); });
   var f = document.getElementById('field'), echo = document.getElementById('echo');

@@ -21,7 +21,7 @@ import java.nio.charset.StandardCharsets;
  */
 final class UltralightCssProbe {
 
-    private static final Logger LOG = LoggerFactory.getLogger("abysse/ul-cssprobe");
+    private static final Logger LOG = LoggerFactory.getLogger("ultralight/cssprobe");
 
     // Activable par propriété système (-Dultralight.cssprobe=true) OU variable
     // d'environnement (ULTRALIGHT_CSSPROBE=true). L'env est plus fiable car héritée
@@ -64,7 +64,7 @@ final class UltralightCssProbe {
         }
         try {
             view = new UltralightBrowserView(512, 512, 1.0);
-            // Vérifie le pont JS→Java natif : la page appelle window.abysseQuery(...).
+            // Vérifie le pont JS→Java natif : la page appelle window.ulQuery(...).
             view.setQueryHandler(msg ->
                     LOG.info("[ul-cssprobe] pont JS→Java reçu : {}", msg));
             view.loadHTML(html);

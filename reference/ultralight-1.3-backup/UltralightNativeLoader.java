@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
  */
 final class UltralightNativeLoader {
 
-    private static final Logger LOG = LoggerFactory.getLogger("abysse/ul-loader");
+    private static final Logger LOG = LoggerFactory.getLogger("ultralight/loader");
 
     static final String SDK_DIR_NAME = "ultralight/sdk";
 

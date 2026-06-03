@@ -1,11 +1,11 @@
 # Ultralight API — guide d'intégration
 
 Mod-API Fabric (client, MC 1.21.11) qui rend du HTML/CSS/JS dans une texture Minecraft
-via Ultralight 1.3.0 (WebKit 608, ≈ Safari 13). Conçu pour être consommé par un autre
-mod (p.ex. **abysse**) via `mavenLocal()`.
+via **Ultralight 1.4 (WebKit 615, ≈ Safari 16.4)** (binding Luminescence). Conçu pour être
+consommé par un autre mod via `mavenLocal()`.
 
 > **Contrainte absolue : tout doit s'exécuter sur le render thread du client.**
-> ultralight-java 0.4.12 met en cache le `JNIEnv` du thread d'init ; un appel depuis un
+> Le binding JNI met en cache le `JNIEnv` du thread d'init ; un appel depuis un
 > autre thread = corruption mémoire native. En pratique : appelle l'API depuis le rendu
 > (HUD, `Screen.render`, callbacks MC marshalés via `MinecraftClient.execute`).
 
@@ -15,7 +15,7 @@ mod (p.ex. **abysse**) via `mavenLocal()`.
 
 | Méthode | Rôle |
 |---|---|
-| `static void init()` | Initialise plateforme + renderer. Idempotent. Appelé au démarrage client. No-op si natives absentes. |
+| `static void init()` | À appeler dans `onInitializeClient`. Enregistre le pilote de frame ; l'init native (plateforme + renderer) est **différée au 1er frame** (fenêtre/GL prêtes). |
 | `static boolean isReady()` | Le moteur est-il prêt. |
 | `static void renderFrame()` | **Pompe un cycle** update/render/paint des vues actives. À appeler depuis `Screen.render()` (voir §4) — sinon, en jeu, le rendu est piloté automatiquement par `HudRenderCallback`. Ne pas appeler en plus du tick HUD dans la même frame. |
 
@@ -56,10 +56,11 @@ l'alpha straight dé-prémultiplié ; **n'utilise PAS** `GUI_TEXTURED_PREMULTIPL
 (zones semi-transparentes délavées).
 
 ### Pont JS ↔ Java
-Côté page : `window.abysseQuery(data)` (fonction native, injectée à chaque chargement).
+Côté page : `window.ulQuery(data)` (fonction native, injectée à chaque chargement ;
+nom configurable via `UltralightBrowserView.setBridgeName("…")`).
 Côté Java :
 ```java
-view.setQueryHandler(msg -> { /* msg = la string passée à abysseQuery, sur le render thread */ });
+view.setQueryHandler(msg -> { /* msg = la string passée à ulQuery, sur le render thread */ });
 view.updateQueryHandler(handler);              // remplace le handler sans recréer la vue
 ```
 Pas de polling, pas de latence (callback natif JavaScriptCore).
@@ -97,9 +98,10 @@ Le handler reçoit une **forme de curseur GLFW** (`GLFW_HAND_CURSOR`, `GLFW_IBEA
 Une sonde charge une page de test et logge les capacités CSS réelles + `userAgent`.
 Activable par `-Dultralight.cssprobe=true` ou `ULTRALIGHT_CSSPROBE=true`. Inactive sinon.
 
-Résumé des capacités WebKit 608 : **grid OK**, transforms/transitions/filter/sticky/object-fit/mask OK ;
-**absents** : flex `gap`, `backdrop-filter`, `aspect-ratio`, `:has()`, conic-gradient,
-`inset` (raccourci), `overflow:clip`. Contourne au markup (grid+gap au lieu de flex-gap, etc.).
+Capacités WebKit **615** (Safari 16.4) : grid, flexbox `gap`, `aspect-ratio`, `clip-path`,
+`-webkit-backdrop-filter`, `var()`, `inset`, `overflow:clip`, transforms, transitions, filter…
+**Non rendus par ce build** : `conic-gradient`, `:has()` (utiliser `radial-gradient` / restructurer).
+Perf : en CPU mode, éviter les animations plein écran continues + `backdrop-filter` (repaint coûteux).
 
 ---
 
@@ -137,20 +139,20 @@ Points qui font qu'un overlay s'adapte à la **fenêtre** (et pas au réglage «
 
 ### Ce qui marche (recommandé)
 - **`loadHTML(String)`** avec CSS/JS inline + données injectées → couvre la plupart des UIs.
-- **Pont JS** pour les données dynamiques : la page appelle `window.abysseQuery("getInventory")`,
+- **Pont JS** pour les données dynamiques : la page appelle `window.ulQuery("getInventory")`,
   Java reçoit via `setQueryHandler`, calcule, et renvoie via
   `view.executeJavaScript("window.onInventory(" + json + ")")`. Aller-retour propre, sans réseau.
 
-### Schéma d'URL custom (`abysse://…`) — ❌ NE MARCHE PAS (testé sur 1.3)
-Vérifié empiriquement : Ultralight 1.3 **ne route pas** un schéma inconnu vers le
+### Schéma d'URL custom (`app://…`) — ❌ NE MARCHE PAS (testé)
+Vérifié empiriquement : Ultralight **ne route pas** un schéma inconnu vers le
 `UltralightFileSystem`. Il le traite comme une requête **réseau** (charge même le CA cert TLS)
-puis échoue (`Load failed`), et `fetch("abysse://…")` est bloqué par les contrôles d'origine
+puis échoue (`Load failed`), et `fetch("app://…")` est bloqué par les contrôles d'origine
 (*« Cross origin requests are only supported for HTTP »*). N'y comptez pas.
 
 ### Repli pour des UIs multi-fichiers (si vraiment nécessaire)
 Le `FileSystem` **est** consulté pour les URLs `file://` (c'est ainsi que le SDK charge ses
 propres ressources). On peut donc, au besoin, faire un **FileSystem virtuel** : `loadURL`/
 sous-ressources en `file://` sous un préfixe réservé, dont `fileExists`/`openFile`/`readFromFile`
-**synthétisent** le contenu en Java (pas besoin de fichier réel). À ne construire que si abysse
+**synthétisent** le contenu en Java (pas besoin de fichier réel). À ne construire que si le mod consommateur
 sert réellement des assets séparés (.css/.js/.png) — sinon `loadHTML` + pont JS suffit.
 Note : `fetch()` reste soumis à CORS même en `file://` → privilégier le pont JS pour les données.

@@ -1,7 +1,7 @@
 # Exemple de référence — overlay web interactif (NON compilé)
 
 Ces fichiers **ne font pas partie du mod** (hors de `src/`). Ils servent d'exemple
-fonctionnel et validé d'un overlay Ultralight réactif, à reprendre côté **abysse**.
+fonctionnel et validé d'un overlay Ultralight réactif, à reprendre côté **mod consommateur**.
 
 ## Fichiers
 - `UltralightDemoScreen.java` — un `Screen` MC qui crée une vue, route le vrai input
@@ -26,5 +26,5 @@ fonctionnel et validé d'un overlay Ultralight réactif, à reprendre côté **a
    remis à `0L` à la fermeture.
 
 > Note : ces fichiers étaient dans le package `net.ostore.ultralight` ; pour les utiliser
-> depuis abysse (autre package), tout passe par l'API publique de `UltralightBrowserView`
+> depuis un autre mod (autre package), tout passe par l'API publique de `UltralightBrowserView`
 > et `UltralightEngine.renderFrame()`.

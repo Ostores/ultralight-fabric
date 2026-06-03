@@ -3,10 +3,12 @@
   "id": "ultralight",
   "version": "1.0",
   "name": "Ultralight API",
-  "description": "Ultralight web rendering engine for Fabric mods (abysse API mod)",
-  "authors": [],
-  "contact": {},
-  "license": "All-Rights-Reserved",
+  "description": "Ultralight (WebKit) HTML/CSS/JS rendering engine for Fabric mods",
+  "authors": ["Ostores"],
+  "contact": {
+    "sources": "https://github.com/Ostores/ultralight-fabric"
+  },
+  "license": "MIT",
   "environment": "client",
   "entrypoints": {
     "client": [

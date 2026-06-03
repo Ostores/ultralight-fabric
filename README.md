@@ -44,12 +44,12 @@ puis charge les natifs.
 
 ## Utilisation (API)
 
-Voir **[docs/API.md](docs/API.md)** (moteur, vue, pont JS `window.abysseQuery`, input, curseurs,
+Voir **[docs/API.md](docs/API.md)** (moteur, vue, pont JS `window.ulQuery`, input, curseurs,
 recette d'overlay réactif) et l'exemple complet dans **[reference/overlay-example/](reference/overlay-example/)**.
 
 ## Licences
 
-- **Code de ce mod** : voir `LICENSE` *(à définir)*.
+- **Code de ce mod** : [MIT](LICENSE). Voir aussi [NOTICES.md](NOTICES.md).
 - **Ultralight** : SDK propriétaire, licence [Ultralight Free](https://ultralig.ht/pricing)
   (gratuit < 100 k$ de CA/financement, PC, usage applicatif, **attribution requise**).
   Les binaires ne sont pas redistribués dans ce repo ; le jar de release les embarque.

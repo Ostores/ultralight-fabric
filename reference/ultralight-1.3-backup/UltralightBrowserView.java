@@ -65,16 +65,16 @@ import java.util.function.IntConsumer;
  *   <li>Mise à jour limitée au {@code dirtyBounds()} hors premier upload.</li>
  * </ul>
  *
- * <p>Pont JS↔Java ({@link #installBridge}) : {@code window.abysseQuery(data)} est une
+ * <p>Pont JS↔Java ({@link #installBridge}) : {@code window.ulQuery(data)} est une
  * vraie fonction native (JavaScriptCore) — plus de polling ni de throttle. Le contrat
- * public est inchangé : côté JS {@code window.abysseQuery(...)}, côté Java
+ * public est inchangé : côté JS {@code window.ulQuery(...)}, côté Java
  * {@code Consumer<String>}.
  *
  * <p>{@link #close()} charge {@code about:blank} pour tuer les timers JS natifs.
  */
 public final class UltralightBrowserView {
 
-    private static final Logger LOG = LoggerFactory.getLogger("abysse/ul-view");
+    private static final Logger LOG = LoggerFactory.getLogger("ultralight/view");
 
     /** recip[a] ≈ (255/a) << 16 — dé-prémultiplication sans division par pixel. */
     private static final int[] UNPREMULT_RECIP = new int[256];
@@ -200,7 +200,7 @@ public final class UltralightBrowserView {
 
     // =========================================================================
     //  Input — render thread. Coordonnées attendues : pixels locaux à la vue
-    //  (le placement à l'écran est géré par l'appelant, p.ex. abysse).
+    //  (le placement à l'écran est géré par l'appelant, p.ex. le mod consommateur).
     //  Codes touches/boutons/modifiers : conventions GLFW (= celles de MC).
     // =========================================================================
 
@@ -424,7 +424,7 @@ public final class UltralightBrowserView {
     // =========================================================================
 
     /**
-     * Installe {@code window.abysseQuery} comme fonction native, à chaque création
+     * Installe {@code window.ulQuery} comme fonction native, à chaque création
      * d'objet window (= chaque navigation, le contexte JS est recréé).
      */
     private void installBridge() {
@@ -440,7 +440,7 @@ public final class UltralightBrowserView {
                         .bake();
             }
             JavascriptObject fn = ctx.makeObject(bridgeClass);
-            ctx.getGlobalObject().setProperty("abysseQuery", fn,
+            ctx.getGlobalObject().setProperty("ulQuery", fn,
                     JavascriptPropertyAttributes.READ_ONLY | JavascriptPropertyAttributes.DONT_DELETE);
         } catch (Throwable t) {
             LOG.warn("[ul-view:{}] Bridge install failed: {}", viewId, t.getMessage());

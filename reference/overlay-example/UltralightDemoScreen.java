@@ -38,7 +38,7 @@ import java.util.Map;
  */
 public final class UltralightDemoScreen extends Screen {
 
-    private static final Logger LOG = LoggerFactory.getLogger("abysse/ul-demoscreen");
+    private static final Logger LOG = LoggerFactory.getLogger("ultralight/demoscreen");
 
     /** Hauteur CSS logique cible : le contenu est conçu pour ~cette hauteur, quelle que soit la fenêtre. */
     private static final double REF_CSS_HEIGHT = 600.0;

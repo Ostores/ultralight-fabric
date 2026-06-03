@@ -127,7 +127,7 @@ java {
     withSourcesJar()
 }
 
-// Publication Maven locale — abysse référence ce mod via mavenLocal()
+// Publication Maven locale — le mod consommateur référence ce mod via mavenLocal()
 // Publie aussi le -dev.jar (intermediary) que Loom utilise pour la compilation côté dépendant.
 publishing {
     publications {
