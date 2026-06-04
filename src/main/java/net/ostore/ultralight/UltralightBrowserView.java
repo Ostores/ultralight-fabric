@@ -93,8 +93,28 @@ public final class UltralightBrowserView {
     //  API publique — render thread
     // =========================================================================
 
-    public void loadHTML(String html) { pageReady.set(false); view.loadHTML(html); }
+    public void loadHTML(String html) { pageReady.set(false); view.loadHTML(sanitizeForLoad(html)); }
     public void loadURL(String url)   { pageReady.set(false); view.loadURL(url); }
+
+    /**
+     * Convertit les caractères hors du plan multilingue de base (BMP) — c.-à-d. les paires de
+     * substitution, comme les emoji 🗑/🎯/… — en entités numériques HTML ({@code &#NNN;}).
+     *
+     * <p>Le passage {@code String} → natif de {@code view.loadHTML} échoue sur les surrogates et
+     * renvoie un document VIDE (page blanche, scripts jamais exécutés). On rend donc la chaîne
+     * ASCII-safe pour les caractères hors-BMP avant de la passer au moteur ; WebKit décode les
+     * entités normalement.
+     */
+    private static String sanitizeForLoad(String html) {
+        if (html == null) return "";
+        StringBuilder sb = new StringBuilder(html.length() + 16);
+        for (int i = 0; i < html.length(); ) {
+            int cp = html.codePointAt(i);
+            if (cp > 0xFFFF) { sb.append("&#").append(cp).append(';'); i += Character.charCount(cp); }
+            else { sb.append(html.charAt(i)); i++; }
+        }
+        return sb.toString();
+    }
 
     public void resize(int physicalWidth, int physicalHeight) {
         view.resize(physicalWidth, physicalHeight);
@@ -344,10 +364,26 @@ public final class UltralightBrowserView {
             String name = bridgeName;
             ctx.evaluate(
                 "window['" + name + "']=function(d){(window." + ULQ + "=window." + ULQ
-                + "||[]).push(String(d));};window." + ULQ + "=window." + ULQ + "||[];");
-            LOG.info("[ul-view:{}] pont JS installé (file) : window.{}", viewId, name);
+                + "||[]).push(String(d));};window." + ULQ + "=window." + ULQ + "||[];"
+                // Capture des erreurs JS non-catchées pour diagnostic (lisible via probe Java).
+                + "if(!window.__ulErrHook){window.__ulErrHook=1;window.addEventListener('error',function(e){"
+                + "window.__ulErr=(window.__ulErr?window.__ulErr+' | ':'')+((e&&e.message)||e)+' @'+((e&&e.filename)||'')+':'+((e&&e.lineno)||0);});}");
+            LOG.debug("[ul-view:{}] pont JS installé (file) : window.{}", viewId, name);
         } catch (Throwable t) {
             LOG.warn("[ul-view:{}] Bridge install failed: {}", viewId, t.getMessage());
+        }
+    }
+
+    /**
+     * Évalue du JS côté Java via {@code ctx.evaluate} (chemin fiable, indépendant du pont in-page
+     * et du console capture) et renvoie le résultat en chaîne. Outil de diagnostic réutilisable.
+     */
+    public String evalString(String js) {
+        try (JSContext ctx = view.acquireJSContextLock()) {
+            JSValue r = ctx.evaluate(js);
+            return r == null ? null : r.toString();
+        } catch (Throwable t) {
+            return "EVAL_ERR:" + t.getMessage();
         }
     }
 
