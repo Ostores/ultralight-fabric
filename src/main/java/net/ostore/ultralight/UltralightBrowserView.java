@@ -73,6 +73,10 @@ public final class UltralightBrowserView {
     private IntBuffer  pixelInts;
     private boolean textureReady   = false;
     private boolean needsFullUpload = true;
+    /** Force un upload complet pendant N frames après un input : Ultralight ne signale pas
+     *  toujours via dirtyBounds les changements de survol/scroll/saisie → on uploade quand même. */
+    private int forcePaint = 0;
+    private static final int REPAINT_AFTER_INPUT = 12;
 
     // JS bridge + curseur
     private volatile Consumer<String> queryHandler;
@@ -159,24 +163,28 @@ public final class UltralightBrowserView {
     // =========================================================================
 
     public void mouseMoved(int x, int y) {
+        forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_MOVED, x, y, MouseButton.NONE)) {
             view.fireMouseEvent(e);
         } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
     }
 
     public void mousePressed(int x, int y, int glfwButton) {
+        forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_DOWN, x, y, mapButton(glfwButton))) {
             view.fireMouseEvent(e);
         } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
     }
 
     public void mouseReleased(int x, int y, int glfwButton) {
+        forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_UP, x, y, mapButton(glfwButton))) {
             view.fireMouseEvent(e);
         } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
     }
 
     public void scroll(int deltaXpixels, int deltaYpixels) {
+        forcePaint = REPAINT_AFTER_INPUT;
         try (ULScrollEvent e = new ULScrollEvent(ScrollEventType.SCROLL_BY_PIXEL, deltaXpixels, deltaYpixels)) {
             view.fireScrollEvent(e);
         } catch (Throwable t) { LOG.debug("[ul-view:{}] scroll: {}", viewId, t.getMessage()); }
@@ -184,16 +192,19 @@ public final class UltralightBrowserView {
 
     public void charTyped(String text) {
         if (text == null || text.isEmpty()) return;
+        forcePaint = REPAINT_AFTER_INPUT;
         try (ULKeyEvent e = new ULKeyEvent(KeyEventType.CHAR, 0, 0, 0, text, text, false, false, false)) {
             view.fireKeyEvent(e);
         } catch (Throwable t) { LOG.debug("[ul-view:{}] char: {}", viewId, t.getMessage()); }
     }
 
     public void keyPressed(int glfwKey, int glfwModifiers) {
+        forcePaint = REPAINT_AFTER_INPUT;
         fireKey(KeyEventType.RAW_KEY_DOWN, glfwKey, glfwModifiers);
     }
 
     public void keyReleased(int glfwKey, int glfwModifiers) {
+        forcePaint = REPAINT_AFTER_INPUT;
         fireKey(KeyEventType.KEY_UP, glfwKey, glfwModifiers);
     }
 
@@ -252,6 +263,17 @@ public final class UltralightBrowserView {
     //  Tick (render thread, chaque frame)
     // =========================================================================
 
+    /**
+     * Appelé AVANT {@code renderer.render()} : force la vue à se re-rastériser pendant quelques
+     * frames après un input. Sinon Ultralight ne repeint qu'à son battement ~1 Hz → survol/scroll
+     * en retard de ~1 s (alors qu'un drag, qui invalide en continu, reste fluide).
+     */
+    void prepareFrame() {
+        if (forcePaint > 0) {
+            try { view.setNeedsPaint(true); } catch (Throwable ignored) {}
+        }
+    }
+
     void onRendererTick() { paintSurface(); drainBridge(); }
 
     // =========================================================================
@@ -267,7 +289,8 @@ public final class UltralightBrowserView {
         int h = surface.getHeight();
         if (w <= 0 || h <= 0) return;
 
-        boolean full = needsFullUpload;
+        boolean full = needsFullUpload || forcePaint > 0;
+        if (forcePaint > 0) forcePaint--;
         int dx = 0, dy = 0, dw = w, dh = h;
         if (!full) {
             if (dirty == null || dirty.right <= dirty.left || dirty.bottom <= dirty.top) return; // rien de sale
@@ -297,26 +320,36 @@ public final class UltralightBrowserView {
         }
     }
 
-    /** Région surface (BGRA prémultiplié) → buffer texture (RGBA straight-alpha), stride respecté. */
+    private int[] blitRow; // tampon de ligne réutilisé (évite la réallocation)
+
+    /**
+     * Région surface (BGRA prémultiplié) → buffer texture (RGBA straight-alpha), par lignes en BLOC.
+     * Transferts {@code IntBuffer} groupés + traitement en {@code int[]} (bien plus rapide que des
+     * get/put pixel-par-pixel), avec chemins rapides opaque (simple swap R↔B) et transparent.
+     */
     private void blit(IntBuffer src, int srcStride, int dstStride, int x0, int y0, int rw, int rh) {
+        int[] row = blitRow;
+        if (row == null || row.length < rw) { row = new int[rw]; blitRow = row; }
         for (int y = y0; y < y0 + rh; y++) {
-            int srcRow = y * srcStride;
-            int dstRow = y * dstStride;
-            for (int x = x0; x < x0 + rw; x++) {
-                int v = src.get(srcRow + x);          // 0xAARRGGBB prémultiplié
-                int a = (v >>> 24) & 0xFF;
-                int r = (v >>> 16) & 0xFF;
-                int g = (v >>> 8)  & 0xFF;
-                int b =  v         & 0xFF;
-                if (a != 0 && a != 255) {              // dé-prémultiplication
+            src.position(y * srcStride + x0);
+            src.get(row, 0, rw);                       // lecture en bloc de la ligne sale
+            for (int i = 0; i < rw; i++) {
+                int v = row[i];                        // 0xAARRGGBB prémultiplié
+                int a = v >>> 24;
+                if (a == 255) {                        // opaque : simple swap R↔B
+                    row[i] = (v & 0xFF00FF00) | ((v & 0xFF) << 16) | ((v >>> 16) & 0xFF);
+                } else if (a == 0) {
+                    row[i] = 0;
+                } else {                               // dé-prémultiplication
                     int rcp = UNPREMULT_RECIP[a];
-                    r = Math.min(255, (r * rcp + 32768) >> 16);
-                    g = Math.min(255, (g * rcp + 32768) >> 16);
-                    b = Math.min(255, (b * rcp + 32768) >> 16);
+                    int r = Math.min(255, (((v >>> 16) & 0xFF) * rcp + 32768) >> 16);
+                    int g = Math.min(255, (((v >>> 8)  & 0xFF) * rcp + 32768) >> 16);
+                    int b = Math.min(255, (( v         & 0xFF) * rcp + 32768) >> 16);
+                    row[i] = (a << 24) | (b << 16) | (g << 8) | r;
                 }
-                // NativeImage RGBA : octets R,G,B,A → int natif (LE) = 0xAABBGGRR.
-                pixelInts.put(dstRow + x, (a << 24) | (b << 16) | (g << 8) | r);
             }
+            pixelInts.position(y * dstStride + x0);
+            pixelInts.put(row, 0, rw);                 // écriture en bloc
         }
     }
 

@@ -90,6 +90,9 @@ public final class UltralightEngine {
         UltralightCssProbe.tick(); // sonde de diagnostic opt-in
         if (activeViews.isEmpty()) return;
         renderer.update();
+        for (UltralightBrowserView v : activeViews) {
+            v.prepareFrame(); // force la re-rastérisation après input (survol/scroll fluides)
+        }
         renderer.render();
         for (UltralightBrowserView v : activeViews) {
             v.onRendererTick();
