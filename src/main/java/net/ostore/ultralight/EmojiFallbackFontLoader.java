@@ -65,11 +65,11 @@ public final class EmojiFallbackFontLoader implements ULFontLoader {
     @Override
     public ULFontFile load(String family, int weight, boolean italic) {
         if (emojiPath != null && EMOJI_FAMILY.equalsIgnoreCase(family)) {
-            if (!loggedLoadE) { LOG.info("[ul-fonts] load() police emoji"); loggedLoadE = true; }
+            if (!loggedLoadE) { LOG.debug("[ul-fonts] load() police emoji"); loggedLoadE = true; }
             return ULFontFile.createFromFilePath(emojiPath);
         }
         if (symbolsPath != null && SYMBOLS_FAMILY.equalsIgnoreCase(family)) {
-            if (!loggedLoadS) { LOG.info("[ul-fonts] load() police symboles"); loggedLoadS = true; }
+            if (!loggedLoadS) { LOG.debug("[ul-fonts] load() police symboles"); loggedLoadS = true; }
             return ULFontFile.createFromFilePath(symbolsPath);
         }
         return delegate.load(family, weight, italic);
@@ -82,8 +82,11 @@ public final class EmojiFallbackFontLoader implements ULFontLoader {
                 int cp = chars.codePointAt(i);
                 String fam = pick(cp);
                 if (fam != null) {
-                    if (loggedCps.size() < 600 && loggedCps.add(cp)) {
-                        LOG.info("[ul-fonts] U+{} → {}", hex(cp), fam);
+                    // Diagnostic par codepoint en DEBUG uniquement : sur une page riche en symboles,
+                    // WebKit interroge ce loader pour de nombreux codepoints → en INFO ça noierait les
+                    // logs (et coûterait hex() inutilement). Le résumé d'init reste, lui, en INFO.
+                    if (LOG.isDebugEnabled() && loggedCps.size() < 600 && loggedCps.add(cp)) {
+                        LOG.debug("[ul-fonts] U+{} → {}", hex(cp), fam);
                     }
                     return fam;
                 }
