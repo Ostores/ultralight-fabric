@@ -3,7 +3,6 @@ package net.ostore.ultralight;
 import me.ayydxn.luminescence.config.ULConfig;
 import me.ayydxn.luminescence.platform.ULPlatform;
 import me.ayydxn.luminescence.platform.impl.StandardULFileSystem;
-import me.ayydxn.luminescence.platform.impl.StandardULFontLoader;
 import me.ayydxn.luminescence.renderer.ULRenderer;
 import me.ayydxn.luminescence.view.ULView;
 import me.ayydxn.luminescence.view.ULViewConfig;
@@ -58,7 +57,7 @@ public final class UltralightEngine {
             return;
         }
         try {
-            ULPlatform.setFontLoader(new StandardULFontLoader());
+            ULPlatform.setFontLoader(new EmojiFallbackFontLoader()); // + police emoji de secours embarquée
             ULPlatform.setFileSystem(new StandardULFileSystem());
 
             try (ULConfig config = new ULConfig()) {
