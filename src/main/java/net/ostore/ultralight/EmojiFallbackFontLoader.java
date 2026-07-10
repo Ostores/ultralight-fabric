@@ -37,8 +37,12 @@ public final class EmojiFallbackFontLoader implements ULFontLoader {
 
     private static final Logger LOG = LoggerFactory.getLogger("ultralight/fonts");
 
-    private static final boolean IS_MAC =
-            System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
+    // Le chemin de polices système du natif Luminescence est défaillant sur les Unix (macOS ET
+    // Linux : crash null dans lastResortFallbackFont) ; seul Windows fonctionne. On considère donc
+    // « Unix = non-Windows » pour router le fallback vers nos polices embarquées (chargeables par
+    // chemin de fichier), plutôt que de déléguer à une famille système non chargeable.
+    private static final boolean IS_UNIX =
+            !System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
 
     public static final String EMOJI_FAMILY   = "AbysseEmoji";
     public static final String SYMBOLS_FAMILY = "AbysseSymbols";
@@ -103,10 +107,10 @@ public final class EmojiFallbackFontLoader implements ULFontLoader {
                 i += Character.charCount(cp);
             }
         }
-        // macOS : le chemin de polices système du natif est peu fiable (cf. getFallbackFont) — on
-        // route le texte courant vers notre police embarquée dès qu'elle couvre le glyphe, plutôt
-        // que de déléguer à une famille système potentiellement non chargeable (2e crash évité).
-        if (IS_MAC && textPath != null && textAwt != null && chars != null) {
+        // Unix (macOS/Linux) : le chemin de polices système du natif est défaillant (cf.
+        // getFallbackFont) — on route le texte courant vers notre police embarquée dès qu'elle
+        // couvre le glyphe, plutôt que de déléguer à une famille système non chargeable (2e crash).
+        if (IS_UNIX && textPath != null && textAwt != null && chars != null) {
             for (int i = 0, n = chars.length(); i < n; ) {
                 int cp = chars.codePointAt(i);
                 if (textAwt.canDisplay(cp)) return TEXT_FAMILY;
