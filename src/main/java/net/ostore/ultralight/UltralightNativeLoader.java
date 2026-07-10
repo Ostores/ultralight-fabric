@@ -94,13 +94,13 @@ final class UltralightNativeLoader {
         try {
             if (Files.isRegularFile(marker)
                     && tag.equals(Files.readString(marker, StandardCharsets.UTF_8).trim())
-                    && Files.isDirectory(binDir)) {
-                return true; // déjà installé
+                    && nativesComplete(platform, binDir)) {
+                return true; // déjà installé (SDK + JNI présents)
             }
         } catch (Exception ignore) {}
 
-        // Repli dev : natifs placés à la main (UL libs + JNI présents) → pas de téléchargement.
-        if (Files.isRegularFile(binDir.resolve(jniLibName(platform)))) {
+        // Repli dev : natifs placés à la main (SDK UL + JNI présents) → pas de téléchargement.
+        if (nativesComplete(platform, binDir)) {
             LOG.info("[ul] Natifs déjà présents dans {} — téléchargement ignoré.", binDir);
             writeMarker(marker, tag);
             return true;
@@ -117,8 +117,8 @@ final class UltralightNativeLoader {
             } finally {
                 Files.deleteIfExists(zip);
             }
-            if (!Files.isRegularFile(binDir.resolve(jniLibName(platform)))) {
-                LOG.error("[ul] Pack téléchargé invalide (JNI absent) pour {}.", platform);
+            if (!nativesComplete(platform, binDir)) {
+                LOG.error("[ul] Pack téléchargé invalide (SDK Ultralight ou JNI absent) pour {}.", platform);
                 return false;
             }
             writeMarker(marker, tag);
@@ -170,6 +170,24 @@ final class UltralightNativeLoader {
         if (platform.startsWith("windows")) return "LuminescenceJNI.dll";
         if (platform.startsWith("macos"))   return "libLuminescenceJNI.dylib";
         return "libLuminescenceJNI.so";
+    }
+
+    /** Bibliothèque cœur du SDK Ultralight (WebCore) — sa présence = SDK réellement installé. */
+    private static String sdkCoreLibName(String platform) {
+        if (platform.startsWith("windows")) return "WebCore.dll";
+        if (platform.startsWith("macos"))   return "libWebCore.dylib";
+        return "libWebCore.so";
+    }
+
+    /**
+     * Vrai si le pont JNI <b>et</b> le cœur du SDK Ultralight sont présents dans {@code bin/}.
+     * On ne se fie pas au seul JNI : un pack partiel (JNI sans les dylibs du SDK, ou une install
+     * interrompue) laissait sinon un {@code bin/} « valide » que Luminescence rejetait ensuite
+     * ({@code WebCore introuvable}). Vérifier le cœur du SDK rend l'install auto-réparable.
+     */
+    private static boolean nativesComplete(String platform, Path binDir) {
+        return Files.isRegularFile(binDir.resolve(jniLibName(platform)))
+            && Files.isRegularFile(binDir.resolve(sdkCoreLibName(platform)));
     }
 
     /** Doit correspondre aux noms de packs et au loader Luminescence. */
