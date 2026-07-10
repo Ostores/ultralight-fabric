@@ -51,6 +51,22 @@ public final class UltralightEngine {
 
     /** Initialisation native — appelée une seule fois, sur le render thread, au premier frame. */
     private static void doInit() {
+        // Désactivation manuelle (support / machines à problème). Aussi via env ULTRALIGHT_DISABLE.
+        if (isDisabledByUser()) {
+            LOG.info("[ul] Rendu HTML désactivé par configuration (-Dultralight.disable).");
+            return;
+        }
+        // Les natifs WebKit 615 sont compilés avec AVX. Sur un CPU sans AVX (Intel pré-2011,
+        // AMD pré-Bulldozer), la 1re instruction AVX lève un SIGILL natif = crash JVM dur, NON
+        // rattrapable par try/catch. On refuse donc d'appeler le moindre code natif Luminescence.
+        // Contournable via -Dultralight.skipCpuCheck=true (tests uniquement).
+        if (!"true".equalsIgnoreCase(System.getProperty("ultralight.skipCpuCheck"))
+                && !cpuSupportsAvx()) {
+            LOG.warn("[ul] CPU sans support AVX détecté — WebKit 615 requiert AVX. "
+                    + "Rendu HTML désactivé pour éviter un crash natif (EXCEPTION_ILLEGAL_INSTRUCTION). "
+                    + "Force via -Dultralight.skipCpuCheck=true (à vos risques).");
+            return;
+        }
         Path sdkDir = UltralightNativeLoader.load();
         if (sdkDir == null) {
             LOG.warn("[ul] Natifs non disponibles — rendu HTML désactivé.");
@@ -84,6 +100,33 @@ public final class UltralightEngine {
             LOG.info("[ul] Moteur Ultralight 1.4 initialisé.");
         } catch (Throwable t) {
             LOG.error("[ul] Initialisation échouée", t);
+        }
+    }
+
+    /** Interrupteur de désactivation manuelle : -Dultralight.disable=true ou ULTRALIGHT_DISABLE=true. */
+    private static boolean isDisabledByUser() {
+        if ("true".equalsIgnoreCase(System.getProperty("ultralight.disable"))) return true;
+        String env = System.getenv("ULTRALIGHT_DISABLE");
+        return env != null && "true".equalsIgnoreCase(env.trim());
+    }
+
+    /**
+     * Vrai si le CPU supporte AVX. On lit le flag interne {@code UseAVX} de la JVM HotSpot
+     * (0 = pas d'AVX ; >=1 = AVX/AVX2/AVX512), déterminé par HotSpot à partir des flags CPU réels.
+     * Zéro dépendance, zéro appel natif. En cas d'indisponibilité (JVM non-HotSpot, flag absent,
+     * erreur), on renvoie {@code true} pour ne pas bloquer inutilement (comportement historique).
+     */
+    private static boolean cpuSupportsAvx() {
+        try {
+            com.sun.management.HotSpotDiagnosticMXBean bean =
+                    java.lang.management.ManagementFactory.getPlatformMXBean(
+                            com.sun.management.HotSpotDiagnosticMXBean.class);
+            if (bean == null) return true;
+            String v = bean.getVMOption("UseAVX").getValue();
+            return Integer.parseInt(v.trim()) >= 1;
+        } catch (Throwable t) {
+            LOG.debug("[ul] Détection AVX impossible ({}), on tente l'init.", t.toString());
+            return true;
         }
     }
 
