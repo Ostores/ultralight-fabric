@@ -105,7 +105,35 @@ jobs:
       - name: CMake build
         run: cmake --build build/cmake-build --config Release --parallel
 
-      # Pack runtime : bin/ {libs Ultralight + LuminescenceJNI} + resources/ (icudt, cacert).
+      # Embarque les deps système partagées des libs Ultralight (ex. libbz2) dans bin/, pour les
+      # runtimes minimaux / sandbox Flatpak où elles manquent (UnsatisfiedLinkError libWebCore →
+      # libbz2.so.1.0). Le loader du mod les précharge avant le SDK. On EXCLUT la glibc, la
+      # toolchain (libstdc++/libgcc_s) et les libs d'affichage (GL/X/wayland/drm) : elles doivent
+      # venir du système/hôte (bundlées, elles entreraient en conflit).
+      - name: Bundle Linux runtime deps
+        if: runner.os == 'Linux'
+        run: |
+          SDKBIN="$RUNNER_TEMP/ultralight-sdk/bin"
+          JNI="build/cmake-build/${{ matrix.lib }}"
+          DENY='^(linux-vdso|ld-linux.*|libc|libm|libdl|libpthread|librt|libresolv|libutil|libnsl|libstdc\+\+|libgcc_s|libGL|libGLX|libGLdispatch|libEGL|libOpenGL|libX11|libxcb|libXau|libXdmcp|libdrm|libgbm|libwayland.*)\.so'
+          bundle_one() {
+            ldd "$1" 2>/dev/null | awk '$2=="=>"{print $1" "$3}' | while read -r soname path; do
+              [ -z "$path" ] && continue
+              [ "$path" = "not" ] && continue          # "=> not found"
+              case "$soname" in */*) continue;; esac    # nom = chemin absolu → ignore
+              echo "$soname" | grep -Eq "$DENY" && continue
+              if [ ! -e "$SDKBIN/$soname" ] && [ -e "$path" ]; then
+                cp -L "$path" "$SDKBIN/$soname"
+                echo "  bundled: $soname  <- $path"
+              fi
+            done
+          }
+          for l in "$SDKBIN"/libWebCore.so "$SDKBIN"/libUltralight.so "$SDKBIN"/libUltralightCore.so "$SDKBIN"/libAppCore.so "$JNI"; do
+            [ -e "$l" ] && { echo "== ldd $(basename "$l") =="; bundle_one "$l"; }
+          done
+          echo "bin/ après bundling :"; ls -la "$SDKBIN"
+
+      # Pack runtime : bin/ {libs Ultralight + LuminescenceJNI + deps bundlées} + resources/.
       - name: Assemble natives pack
         run: |
           PACK="$RUNNER_TEMP/pack"
