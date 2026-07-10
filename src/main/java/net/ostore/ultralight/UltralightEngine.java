@@ -57,7 +57,18 @@ public final class UltralightEngine {
             return;
         }
         try {
-            ULPlatform.setFontLoader(new EmojiFallbackFontLoader()); // + police emoji de secours embarquée
+            // Police de secours emoji/symboles embarquée (routage Arial-aware). Désactivable via
+            // -Dultralight.emojifallback=false → loader standard. Utile sur macOS où notre loader
+            // initialise AWT/CoreText dans son constructeur, ce qui peut interagir avec la pile de
+            // polices système (voir collision WebCore système/Ultralight sur macOS).
+            boolean emojiFallback = !"false".equalsIgnoreCase(
+                    System.getProperty("ultralight.emojifallback", "true"));
+            if (emojiFallback) {
+                ULPlatform.setFontLoader(new EmojiFallbackFontLoader());
+            } else {
+                ULPlatform.setFontLoader(new me.ayydxn.luminescence.platform.impl.StandardULFontLoader());
+                LOG.info("[ul] Police de secours emoji désactivée (-Dultralight.emojifallback=false) → loader standard.");
+            }
             ULPlatform.setFileSystem(new StandardULFileSystem());
 
             try (ULConfig config = new ULConfig()) {
