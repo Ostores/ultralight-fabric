@@ -37,16 +37,25 @@ public final class EmojiFallbackFontLoader implements ULFontLoader {
 
     private static final Logger LOG = LoggerFactory.getLogger("ultralight/fonts");
 
+    // Le chemin de polices système du natif Luminescence est défaillant sur les Unix (macOS ET
+    // Linux : crash null dans lastResortFallbackFont) ; seul Windows fonctionne. On considère donc
+    // « Unix = non-Windows » pour router le fallback vers nos polices embarquées (chargeables par
+    // chemin de fichier), plutôt que de déléguer à une famille système non chargeable.
+    private static final boolean IS_UNIX =
+            !System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+
     public static final String EMOJI_FAMILY   = "AbysseEmoji";
     public static final String SYMBOLS_FAMILY = "AbysseSymbols";
+    public static final String TEXT_FAMILY    = "AbysseText";
 
     private static final String RES_EMOJI   = "/fonts/NotoEmoji-Regular.ttf";
     private static final String RES_SYMBOLS = "/fonts/NotoSansSymbols2-Regular.ttf";
+    private static final String RES_TEXT    = "/fonts/NotoSans-Regular.ttf";
 
     private final StandardULFontLoader delegate;
-    private final String emojiPath, symbolsPath;   // .ttf extraits (rendu), ou null
+    private final String emojiPath, symbolsPath, textPath;  // .ttf extraits (rendu), ou null
     private final Font systemAwt;                   // Arial — pour savoir ce que le système couvre déjà
-    private final Font emojiAwt, symbolsAwt;        // pour choisir la bonne police embarquée
+    private final Font emojiAwt, symbolsAwt, textAwt;       // pour choisir la bonne police embarquée
 
     private final Set<Integer> loggedCps = new HashSet<>();
     private boolean loggedLoadE = false, loggedLoadS = false;
@@ -55,11 +64,13 @@ public final class EmojiFallbackFontLoader implements ULFontLoader {
         this.delegate = new StandardULFontLoader();
         this.emojiPath   = extract(RES_EMOJI,   "emoji");
         this.symbolsPath = extract(RES_SYMBOLS, "symbols");
+        this.textPath    = extract(RES_TEXT,    "text");
         this.emojiAwt   = awtFromPath(emojiPath);
         this.symbolsAwt = awtFromPath(symbolsPath);
+        this.textAwt    = awtFromPath(textPath);
         this.systemAwt  = loadSystemFont();
-        LOG.info("[ul-fonts] secours prêt — emoji:{} symboles:{} systeme(canDisplay):{}",
-                emojiPath != null, symbolsPath != null, systemAwt != null);
+        LOG.info("[ul-fonts] secours prêt — emoji:{} symboles:{} texte:{} systeme(canDisplay):{}",
+                emojiPath != null, symbolsPath != null, textPath != null, systemAwt != null);
     }
 
     @Override
@@ -71,6 +82,9 @@ public final class EmojiFallbackFontLoader implements ULFontLoader {
         if (symbolsPath != null && SYMBOLS_FAMILY.equalsIgnoreCase(family)) {
             if (!loggedLoadS) { LOG.debug("[ul-fonts] load() police symboles"); loggedLoadS = true; }
             return ULFontFile.createFromFilePath(symbolsPath);
+        }
+        if (textPath != null && TEXT_FAMILY.equalsIgnoreCase(family)) {
+            return ULFontFile.createFromFilePath(textPath);
         }
         return delegate.load(family, weight, italic);
     }
@@ -93,11 +107,29 @@ public final class EmojiFallbackFontLoader implements ULFontLoader {
                 i += Character.charCount(cp);
             }
         }
+        // Unix (macOS/Linux) : le chemin de polices système du natif est défaillant (cf.
+        // getFallbackFont) — on route le texte courant vers notre police embarquée dès qu'elle
+        // couvre le glyphe, plutôt que de déléguer à une famille système non chargeable (2e crash).
+        if (IS_UNIX && textPath != null && textAwt != null && chars != null) {
+            for (int i = 0, n = chars.length(); i < n; ) {
+                int cp = chars.codePointAt(i);
+                if (textAwt.canDisplay(cp)) return TEXT_FAMILY;
+                i += Character.charCount(cp);
+            }
+        }
         return delegate.getFallbackFontForCharacters(chars, weight, italic);
     }
 
     @Override
     public String getFallbackFont() {
+        // Police de DERNIER RECOURS. Sur macOS, le StandardULFontLoader de Luminescence renvoie
+        // ici une famille système que le natif ne parvient pas à charger → WebCore::FontCache::
+        // lastResortFallbackFont déréférence null → SIGSEGV à la 1re création de vue (si_addr=0).
+        // On renvoie donc NOTRE police texte embarquée, servie par chemin de fichier disque via
+        // load() ci-dessus — garantie chargeable par le natif (même mécanisme que les emoji, qui
+        // se chargent, eux, sans souci). Filet de sécurité multi-plateforme (n'agit qu'en tout
+        // dernier recours, quand aucune autre police ne correspond).
+        if (textPath != null) return TEXT_FAMILY;
         return delegate.getFallbackFont();
     }
 

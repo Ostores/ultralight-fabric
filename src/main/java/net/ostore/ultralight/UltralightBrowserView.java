@@ -208,6 +208,14 @@ public final class UltralightBrowserView {
         fireKey(KeyEventType.KEY_UP, glfwKey, glfwModifiers);
     }
 
+    /**
+     * Force la re-rastérisation pour les prochaines frames. À appeler chaque frame pour un
+     * overlay <b>animé sans input</b> (ex. HUD à canvas) : sinon, faute de {@code setNeedsPaint},
+     * la vue ne se repeint pas après la frame initiale et l'animation (requestAnimationFrame)
+     * se fige.
+     */
+    public void requestRepaint() { forcePaint = REPAINT_AFTER_INPUT; }
+
     public void focus()   { try { view.focus();   } catch (Throwable ignored) {} }
     public void unfocus() { try { view.unfocus(); } catch (Throwable ignored) {} }
     public boolean hasInputFocus() { try { return view.hasInputFocus(); } catch (Throwable t) { return false; } }

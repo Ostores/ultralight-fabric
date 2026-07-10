@@ -24,6 +24,19 @@ Java/JNI binding to Ultralight — <https://github.com/Solomon-Team/Luminescence
 used as a separate, replaceable component (its jars are not modified). Its source is
 available at the URL above.
 
+## Noto Fonts (bundled)
+
+The release JAR bundles the following Google **Noto** fonts as embedded fallbacks
+(emoji, non-emoji symbols, and a guaranteed-loadable text last-resort — the latter
+notably works around a null-font crash in the Ultralight macOS font path):
+
+- **Noto Emoji** (`NotoEmoji-Regular.ttf`)
+- **Noto Sans Symbols 2** (`NotoSansSymbols2-Regular.ttf`)
+- **Noto Sans** (`NotoSans-Regular.ttf`)
+
+© The Noto Project Authors. Licensed under the **SIL Open Font License 1.1**
+(<https://openfontlicense.org>). Source: <https://github.com/notofonts/notofonts.github.io>.
+
 ## ICU4J
 
 © Unicode, Inc. Licensed under the **Unicode License** (permissive).
