@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  /* Positions ABSOLUES en px CSS : la sonde calcule les coordonnees Minecraft a partir
+     d'elles, donc elles doivent etre exactes et independantes de la mise en page. */
+  html, body { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif;
+               background: rgba(15, 23, 42, 0.92); color: #e2e8f0; overflow: hidden; }
+  #btn   { position: absolute; left: 100px; top: 100px; width: 200px; height:  60px;
+           background: #1d4ed8; border: 2px solid #93c5fd; color: #fff; font-size: 20px; }
+  #txt   { position: absolute; left: 100px; top: 200px; width: 300px; height:  40px;
+           font-size: 20px; box-sizing: border-box; }
+  #link  { position: absolute; left: 100px; top: 300px; width: 200px; height:  40px;
+           background: #334155; cursor: pointer; font-size: 18px; text-align: center;
+           line-height: 40px; }
+  #scroll{ position: absolute; left: 100px; top: 400px; width: 500px; height: 200px;
+           overflow-y: auto; background: #1e293b; }
+  #scroll div { height: 60px; border-bottom: 1px solid #475569; font-size: 16px; }
+  #log   { position: absolute; left: 700px; top: 100px; width: 500px; font-size: 15px;
+           font-family: monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <button id="btn">bouton</button>
+  <input id="txt" type="text">
+  <div id="link">curseur pointer</div>
+  <div id="scroll"></div>
+  <div id="log">en attente…</div>
+
+<script>
+  var sc = document.getElementById('scroll');
+  for (var i = 1; i <= 20; i++) {
+    var d = document.createElement('div');
+    d.textContent = 'ligne ' + i;
+    sc.appendChild(d);
+  }
+
+  var count = 0;
+  function report(o) {
+    count++;
+    document.getElementById('log').textContent =
+        count + ' evenements\ndernier : ' + JSON.stringify(o);
+    if (window.ulQuery) window.ulQuery(JSON.stringify(o));
+  }
+
+  document.addEventListener('mousemove', function (e) {
+    report({ t: 'move', x: e.clientX, y: e.clientY });
+  });
+  document.addEventListener('mousedown', function (e) {
+    report({ t: 'down', x: e.clientX, y: e.clientY, id: e.target.id || '' });
+  });
+  document.addEventListener('click', function (e) {
+    report({ t: 'click', x: e.clientX, y: e.clientY, id: e.target.id || '' });
+  });
+  document.addEventListener('wheel', function (e) {
+    report({ t: 'wheel', dy: e.deltaY });
+  });
+  document.addEventListener('keydown', function (e) {
+    report({ t: 'key', k: e.key, code: e.keyCode });
+  });
+  document.getElementById('txt').addEventListener('input', function (e) {
+    report({ t: 'input', v: e.target.value });
+  });
+</script>
+</body>
+</html>

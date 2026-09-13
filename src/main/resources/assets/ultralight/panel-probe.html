@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; }
+  /* Cadre plein bord : s'il est coupe ou deforme, la geometrie est fausse. */
+  body {
+    box-sizing: border-box;
+    border: 6px solid #38bdf8;
+    background: rgba(15, 23, 42, 0.82);
+    color: #e2e8f0;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 12px;
+    padding: 14px;
+  }
+  .corner { position: absolute; width: 26px; height: 26px; border: 4px solid #f97316; }
+  .tl { top: 4px;    left: 4px;   border-right: none;  border-bottom: none; }
+  .tr { top: 4px;    right: 4px;  border-left: none;   border-bottom: none; }
+  .bl { bottom: 4px; left: 4px;   border-right: none;  border-top: none; }
+  .br { bottom: 4px; right: 4px;  border-left: none;   border-top: none; }
+
+  h1 { margin: 0; font-size: 26px; letter-spacing: 0.5px; }
+  .meta { font-size: 17px; line-height: 1.5; font-family: monospace; }
+  .meta b { color: #7dd3fc; }
+
+  /* Grille 4 colonnes : si le ratio casse la mise en page, ca se voit tout de suite. */
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; align-content: start; }
+  .card {
+    background: rgba(56, 189, 248, 0.16);
+    border: 2px solid rgba(56, 189, 248, 0.5);
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 15px;
+  }
+  /* Reagit au bucket de ratio publie par le panneau. */
+  :root[data-ul-ratio="ultrawide"] .grid { grid-template-columns: repeat(6, 1fr); }
+  :root[data-ul-ratio="tall"]      .grid { grid-template-columns: repeat(2, 1fr); }
+  .ratio { font-size: 15px; opacity: 0.85; }
+</style>
+</head>
+<body>
+  <div class="corner tl"></div><div class="corner tr"></div>
+  <div class="corner bl"></div><div class="corner br"></div>
+
+  <h1>UltralightPanel — test de geometrie</h1>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="meta" id="meta">…</div>
+
+<script>
+  var g = document.getElementById('grid');
+  for (var i = 1; i <= 12; i++) {
+    var d = document.createElement('div');
+    d.className = 'card';
+    d.textContent = 'carte ' + i;
+    g.appendChild(d);
+  }
+
+  function refresh() {
+    var cs = getComputedStyle(document.documentElement);
+    var vw = cs.getPropertyValue('--ul-vw').trim() || '(non defini)';
+    var vh = cs.getPropertyValue('--ul-vh').trim() || '(non defini)';
+    var ar = cs.getPropertyValue('--ul-aspect').trim() || '(non defini)';
+    var bucket = document.documentElement.getAttribute('data-ul-ratio') || '(non defini)';
+    document.getElementById('meta').innerHTML =
+        'innerWidth x innerHeight : <b>' + window.innerWidth + ' x ' + window.innerHeight + '</b><br>' +
+        '--ul-vw / --ul-vh : <b>' + vw + ' / ' + vh + '</b><br>' +
+        '--ul-aspect : <b>' + ar + '</b> &nbsp; data-ul-ratio : <b>' + bucket + '</b>';
+  }
+  refresh();
+  window.addEventListener('ul:resize', refresh);
+  setInterval(refresh, 250);
+</script>
+</body>
+</html>

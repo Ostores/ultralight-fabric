@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif;
+               background: rgba(15, 23, 42, 0.85); color: #e2e8f0; overflow: hidden; }
+  .wrap { position: absolute; inset: 0; padding: 20px; box-sizing: border-box; }
+  h1 { margin: 0 0 12px; font-size: 24px; }
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .card { background: rgba(56, 189, 248, 0.16); border: 2px solid rgba(56, 189, 248, 0.5);
+          border-radius: 8px; padding: 10px; font-size: 15px; }
+  /* Element anime : deplacement continu, donc repaint permanent sur toute une bande. */
+  #mover { position: absolute; left: 0; top: 60%; width: 120px; height: 60px;
+           background: linear-gradient(90deg, #38bdf8, #818cf8); border-radius: 8px; }
+  #mode { position: absolute; left: 20px; bottom: 20px; font-family: monospace; font-size: 16px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Ultralight - mesure de performance</h1>
+    <div class="grid" id="grid"></div>
+    <div id="mover"></div>
+    <div id="mode">statique</div>
+  </div>
+
+<script>
+  var g = document.getElementById('grid');
+  for (var i = 1; i <= 24; i++) {
+    var d = document.createElement('div');
+    d.className = 'card';
+    d.textContent = 'carte ' + i;
+    g.appendChild(d);
+  }
+
+  function startAnimation() {
+    document.getElementById('mode').textContent = 'anime';
+    var el = document.getElementById('mover');
+    var t0 = Date.now();
+    (function step() {
+      var t = (Date.now() - t0) / 1000;
+      var w = window.innerWidth - 140;
+      el.style.left = Math.round((Math.sin(t) * 0.5 + 0.5) * w) + 'px';
+      requestAnimationFrame(step);
+    })();
+  }
+
+  /*ANIM*/
+</script>
+</body>
+</html>
