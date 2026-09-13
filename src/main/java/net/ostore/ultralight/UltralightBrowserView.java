@@ -19,10 +19,12 @@ import me.ayydxn.luminescence.surface.ULSurface;
 import me.ayydxn.luminescence.view.ULCursor;
 import me.ayydxn.luminescence.view.ULView;
 import me.ayydxn.luminescence.view.ULViewListener;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
-import net.minecraft.client.texture.NativeImageBackedTexture;
-import net.minecraft.util.Identifier;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.GpuTexture;
+import net.minecraft.client.Minecraft;
+import com.mojang.blaze3d.platform.NativeImage;
+import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.resources.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.system.MemoryUtil;
 import org.slf4j.Logger;
@@ -67,8 +69,9 @@ public final class UltralightBrowserView {
     private final int viewId;
 
     // MC texture adossée à un buffer natif que nous possédons.
-    private NativeImageBackedTexture mcTexture;
+    private DynamicTexture mcTexture;
     private Identifier texIdentifier;
+    private int texW, texH;          // taille de la texture courante
     private ByteBuffer pixelBuffer;   // mémoire native libérée par NativeImage.close()
     private IntBuffer  pixelInts;
     private boolean textureReady   = false;
@@ -120,11 +123,27 @@ public final class UltralightBrowserView {
         return sb.toString();
     }
 
+    /**
+     * Redimensionne la vue (pixels device). La texture est détruite puis recréée : pendant une à
+     * trois frames {@link #getTextureIdentifier()} renvoie {@code null} et il n'y a rien à dessiner.
+     *
+     * <p>On a essayé de garder l'ancienne texture vivante sous un nouvel identifiant pour éviter ce
+     * trou : le renderer de GUI de MC 26.x n'aime pas qu'un identifiant de texture apparaisse et
+     * disparaisse à ce rythme, et rend la texture en damier. Un trou d'une frame vaut mieux.
+     * Le vrai remède au clignotement est de ne pas redimensionner à chaque frame, ce dont
+     * {@code UltralightPanel} se charge (redimensionnement temporisé).
+     */
     public void resize(int physicalWidth, int physicalHeight) {
+        if (physicalWidth <= 0 || physicalHeight <= 0) return;   // fenêtre minimisée
+        if (physicalWidth == texW && physicalHeight == texH && mcTexture != null) return;
         view.resize(physicalWidth, physicalHeight);
         destroyMcTexture();
         needsFullUpload = true;
         textureReady    = false;
+        // Sans ça, Ultralight ne re-rastérise que ce qu'il juge sale : sur la surface fraîchement
+        // agrandie, tout ce qui est hors de cette zone reste non peint et on publie une texture à
+        // moitié vide pendant quelques frames (bordure au bon endroit, fond absent).
+        forcePaint      = REPAINT_AFTER_INPUT;
     }
 
     public void setDeviceScale(double deviceScale) {
@@ -143,6 +162,10 @@ public final class UltralightBrowserView {
     public void setCursorHandler(IntConsumer handler)          { this.cursorHandler = handler; }
 
     public Identifier getTextureIdentifier() { return textureReady ? texIdentifier : null; }
+    /** Largeur en pixels de la texture courante — à passer en argument de région au blit. */
+    public int getTextureWidth()             { return textureReady ? texW : 0; }
+    /** Hauteur en pixels de la texture courante — à passer en argument de région au blit. */
+    public int getTextureHeight()            { return textureReady ? texH : 0; }
     public boolean isTextureReady()          { return textureReady; }
     public boolean isPageReady()             { return pageReady.get(); }
     public void    setPageReady(boolean v)   { pageReady.set(v); }
@@ -297,16 +320,22 @@ public final class UltralightBrowserView {
         int h = surface.getHeight();
         if (w <= 0 || h <= 0) return;
 
-        boolean full = needsFullUpload || forcePaint > 0;
+        // forcePaint pilote setNeedsPaint(true) dans prepareFrame() (= reactivite survol/scroll : on
+        // force Ultralight a re-rasteriser). Mais il ne doit PAS forcer un upload PLEIN ECRAN : on
+        // s'appuie sur les dirty bounds rapportes par Ultralight pour n'uploader que le rectangle sale
+        // (NativeImageBackedTexture.upload() reenverrait toute la texture → bande passante → chute FPS).
+        boolean full = needsFullUpload; // plein upload UNIQUEMENT au 1er paint / apres resize
         if (forcePaint > 0) forcePaint--;
-        int dx = 0, dy = 0, dw = w, dh = h;
+        // MC 26.x n'accepte plus d'upload d'un sous-rectangle arbitraire : writeToTexture prend un
+        // ByteBuffer CONTIGU de width*height. On reduit donc la zone sale a une BANDE pleine largeur
+        // (les lignes y sont contigues dans notre buffer) : on garde l'essentiel du gain de bande
+        // passante (un HUD ne salit que quelques lignes) sans recopie intermediaire.
+        int dy = 0, dh = h;
         if (!full) {
-            if (dirty == null || dirty.right <= dirty.left || dirty.bottom <= dirty.top) return; // rien de sale
-            dx = Math.max(0, dirty.left);
+            if (dirty == null || dirty.bottom <= dirty.top) return; // rien de sale
             dy = Math.max(0, dirty.top);
-            dw = Math.min(w, dirty.right) - dx;
             dh = Math.min(h, dirty.bottom) - dy;
-            if (dw <= 0 || dh <= 0) return;
+            if (dh <= 0) return;
         }
 
         ensureMcTexture(w, h);
@@ -316,17 +345,74 @@ public final class UltralightBrowserView {
         try (ULSurface.LockedPixels locked = bitmap.acquirePixelLock()) {
             ByteBuffer pixels = locked.pixels();
             IntBuffer src = pixels.order(ByteOrder.LITTLE_ENDIAN).asIntBuffer(); // BGRA prémult → int LE 0xAARRGGBB
+            // Ultralight aligne le pas de ligne (1409 px de large → 1412) : toujours passer
+            // par getRowBytes(), jamais supposer largeur == pas.
             int srcStride = surface.getRowBytes() / 4;
-            blit(src, srcStride, w, dx, dy, dw, dh);
+            blit(src, srcStride, w, 0, dy, w, dh);
             needsFullUpload = false;
-            mcTexture.upload();
+            if (full) mcTexture.upload();      // 1er paint / resize : upload plein (cree aussi la GpuTexture)
+            else      uploadBand(dy, dh, w);   // sinon : seulement la bande sale
             textureReady = true;
+            if (full && DUMP_TEXTURE) dumpTexture(w, h, srcStride, surface.getRowBytes() / 4);
         } catch (Throwable t) {
             LOG.debug("[ul-view:{}] paint: {}", viewId, t.getMessage());
         } finally {
             surface.clearDirtyBounds();
         }
     }
+
+    /** Diagnostic : vider la texture produite sur disque à chaque repaint complet. */
+    private static final boolean DUMP_TEXTURE =
+            Boolean.getBoolean("ultralight.dumptexture")
+            || "true".equalsIgnoreCase(System.getenv("ULTRALIGHT_DUMPTEXTURE"));
+
+    private int dumpCount = 0;
+
+    /** Écrit l'image telle qu'on l'a composée, pour distinguer « notre texture est fausse » de
+     *  « Minecraft la dessine mal ». */
+    private void dumpTexture(int w, int h, int usedStride, int declaredStride) {
+        try {
+            java.nio.file.Path out = java.nio.file.Path.of("ul-dump",
+                    "view" + viewId + "_" + (dumpCount++) + "_" + w + "x" + h
+                            + "_stride" + usedStride + "_declared" + declaredStride + ".png");
+            java.nio.file.Files.createDirectories(out.getParent());
+            mcTexture.getPixels().writeToFile(out);
+            LOG.info("[ul-view:{}] dump texture → {}", viewId, out.toAbsolutePath());
+        } catch (Throwable t) {
+            LOG.warn("[ul-view:{}] dump texture échoué : {}", viewId, t.toString());
+        }
+    }
+
+    /**
+     * Upload GPU d'une bande de lignes seulement (vs {@code mcTexture.upload()} qui reenvoie toute
+     * la texture). La bande [y0, y0+rows[ est contigue dans notre buffer natif, on la passe donc
+     * telle quelle via {@code memSlice} — aucune copie intermediaire.
+     *
+     * <p>{@code writeToTexture(tex, buffer, mipLevel, depthOrLayer, destX, destY, width, height)} :
+     * depuis MC 26.x, la surcharge qui prenait un sous-rectangle source (srcX/srcY) n'existe plus.
+     * Repli sur l'upload plein si la GpuTexture n'existe pas encore ou si l'appel echoue.
+     */
+    private void uploadBand(int y0, int rows, int w) {
+        GpuTexture gpu = mcTexture.getTexture();
+        if (gpu == null || pixelBuffer == null) { mcTexture.upload(); return; }
+        try {
+            ByteBuffer band = MemoryUtil.memSlice(pixelBuffer, y0 * w * 4, rows * w * 4);
+            RenderSystem.getDevice().createCommandEncoder()
+                    .writeToTexture(gpu, band, 0, 0, 0, y0, w, rows);
+        } catch (Throwable t) {
+            // Signalé UNE fois : le repli fonctionne mais coûte toute la bande passante de la
+            // texture à chaque frame, c'est une régression de perf que le dev doit voir.
+            if (!bandUploadFallbackWarned) {
+                bandUploadFallbackWarned = true;
+                LOG.warn("[ul-view:{}] upload par bande indisponible, repli sur l'upload plein : {}",
+                        viewId, t.toString());
+            }
+            mcTexture.upload();
+        }
+    }
+
+    /** Repli d'upload déjà signalé (on ne veut pas un log par frame). */
+    private boolean bandUploadFallbackWarned = false;
 
     private int[] blitRow; // tampon de ligne réutilisé (évite la réallocation)
 
@@ -368,10 +454,12 @@ public final class UltralightBrowserView {
         pixelInts   = pixelBuffer.order(ByteOrder.nativeOrder()).asIntBuffer();
         NativeImage img = new NativeImage(NativeImage.Format.RGBA, w, h, false,
                 MemoryUtil.memAddress(pixelBuffer));
-        mcTexture     = new NativeImageBackedTexture(() -> "ul_view_" + viewId, img);
-        texIdentifier = Identifier.of("ultralight", "ul_view_" + viewId);
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc != null) mc.getTextureManager().registerTexture(texIdentifier, mcTexture);
+        mcTexture     = new DynamicTexture(() -> "ul_view_" + viewId, img);
+        texIdentifier = Identifier.fromNamespaceAndPath("ultralight", "ul_view_" + viewId);
+        texW = w;
+        texH = h;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null) mc.getTextureManager().register(texIdentifier, mcTexture);
         needsFullUpload = true;
     }
 
@@ -380,12 +468,13 @@ public final class UltralightBrowserView {
             Identifier id = texIdentifier;
             texIdentifier = null;
             mcTexture     = null;
-            MinecraftClient mc = MinecraftClient.getInstance();
-            if (mc != null) mc.getTextureManager().destroyTexture(id);
+            Minecraft mc = Minecraft.getInstance();
+            if (mc != null) mc.getTextureManager().release(id);
         } else if (mcTexture != null) {
             mcTexture.close();
             mcTexture = null;
         }
+        texW = texH = 0;
         pixelInts   = null;
         pixelBuffer = null;
     }
@@ -472,7 +561,7 @@ public final class UltralightBrowserView {
             if (!isMainFrame) return;
             pageReady.set(true);
             Consumer<Void> cb = onPageReadyCallback;
-            if (cb != null) MinecraftClient.getInstance().execute(() -> cb.accept(null));
+            if (cb != null) Minecraft.getInstance().execute(() -> cb.accept(null));
         }
 
         @Override

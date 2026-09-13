@@ -6,7 +6,7 @@ import me.ayydxn.luminescence.platform.impl.StandardULFileSystem;
 import me.ayydxn.luminescence.renderer.ULRenderer;
 import me.ayydxn.luminescence.view.ULView;
 import me.ayydxn.luminescence.view.ULViewConfig;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,7 +20,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Singleton gérant le cycle de vie du moteur Ultralight 1.4 (via Luminescence / WebKit 615).
  *
  * <p>Toutes les opérations Ultralight se font sur le <b>render thread</b> (thread principal
- * client MC) via {@link HudRenderCallback} : le binding JNI n'est pas thread-safe.
+ * client MC) : le binding JNI n'est pas thread-safe.
+ *
+ * <p><b>Le cycle du moteur ne doit PAS tourner pendant la phase d'extraction de la GUI.</b> En
+ * MC 26.x, l'interface est construite en deux temps (extraction de l'état, puis soumission GPU) ;
+ * écrire dans une texture GPU au milieu de l'extraction corrompt le lot de dessins de Minecraft :
+ * son fond de menu se met à échantillonner notre texture (page répétée en damier plein écran) et
+ * une vue de la largeur du framebuffer s'affiche en noir plein. Vérifié en jeu, et corrigé en
+ * pompant depuis {@link LevelRenderEvents#START_MAIN}, qui est par frame et antérieur à la GUI.
  */
 public final class UltralightEngine {
 
@@ -36,6 +43,22 @@ public final class UltralightEngine {
 
     static final AtomicInteger VIEW_COUNTER = new AtomicInteger(0);
 
+    // ── Instrumentation optionnelle du coût du cycle moteur (activée par la sonde de perf).
+    //    Deux appels à nanoTime par frame quand elle est active, rien du tout sinon.
+    static volatile boolean perfEnabled = false;
+    private static long perfFrames = 0L;
+    private static long perfNanos  = 0L;
+
+    static void perfReset() { perfFrames = 0L; perfNanos = 0L; }
+
+    /** Coût moyen d'un cycle update/render/paint, en microsecondes. */
+    static double perfAverageMicros() {
+        long f = perfFrames;
+        return f == 0L ? 0.0 : perfNanos / 1000.0 / f;
+    }
+
+    static long perfFrameCount() { return perfFrames; }
+
     private UltralightEngine() {}
 
     public static boolean isReady() { return ready; }
@@ -46,7 +69,10 @@ public final class UltralightEngine {
      * n'existe pas encore et créer le renderer Ultralight 1.4 y plante (ACCESS_VIOLATION).
      */
     public static void init() {
-        HudRenderCallback.EVENT.register((ctx, tick) -> onFrame());
+        // Pompe par frame, dans la phase de rendu du monde et donc AVANT la construction de la GUI.
+        // Surtout pas depuis un élément de HUD ni depuis Screen.extractRenderState : ce sont des
+        // phases d'extraction, et y écrire dans une texture GPU casse le rendu (voir en-tête).
+        LevelRenderEvents.START_MAIN.register(ctx -> onFrame());
     }
 
     /** Initialisation native — appelée une seule fois, sur le render thread, au premier frame. */
@@ -56,13 +82,14 @@ public final class UltralightEngine {
             LOG.info("[ul] Rendu HTML désactivé par configuration (-Dultralight.disable).");
             return;
         }
-        // Les natifs WebKit 615 sont compilés avec AVX. Sur un CPU sans AVX (Intel pré-2011,
-        // AMD pré-Bulldozer), la 1re instruction AVX lève un SIGILL natif = crash JVM dur, NON
+        // Les natifs WebKit 615 utilisent en réalité des instructions AVX2 (ex. VPSRAVD), pas
+        // seulement AVX. Sur un CPU avec AVX mais sans AVX2 (Intel Ivy Bridge et antérieur,
+        // AMD pré-Excavator), la 1re instruction AVX2 lève un SIGILL natif = crash JVM dur, NON
         // rattrapable par try/catch. On refuse donc d'appeler le moindre code natif Luminescence.
         // Contournable via -Dultralight.skipCpuCheck=true (tests uniquement).
         if (!"true".equalsIgnoreCase(System.getProperty("ultralight.skipCpuCheck"))
-                && !cpuSupportsAvx()) {
-            LOG.warn("[ul] CPU sans support AVX détecté — WebKit 615 requiert AVX. "
+                && !cpuSupportsAvx2()) {
+            LOG.warn("[ul] CPU sans support AVX2 détecté — WebKit 615 requiert AVX2. "
                     + "Rendu HTML désactivé pour éviter un crash natif (EXCEPTION_ILLEGAL_INSTRUCTION). "
                     + "Force via -Dultralight.skipCpuCheck=true (à vos risques).");
             return;
@@ -111,29 +138,33 @@ public final class UltralightEngine {
     }
 
     /**
-     * Vrai si le CPU supporte AVX. On lit le flag interne {@code UseAVX} de la JVM HotSpot
-     * (0 = pas d'AVX ; >=1 = AVX/AVX2/AVX512), déterminé par HotSpot à partir des flags CPU réels.
-     * Zéro dépendance, zéro appel natif. En cas d'indisponibilité (JVM non-HotSpot, flag absent,
-     * erreur), on renvoie {@code true} pour ne pas bloquer inutilement (comportement historique).
+     * Vrai si le CPU supporte AVX2. On lit le flag interne {@code UseAVX} de la JVM HotSpot
+     * (0 = pas d'AVX ; 1 = AVX seulement ; >=2 = AVX2/AVX512), déterminé par HotSpot à partir des
+     * flags CPU réels. Zéro dépendance, zéro appel natif. En cas d'indisponibilité (JVM non-HotSpot,
+     * flag absent, erreur), on renvoie {@code true} pour ne pas bloquer inutilement (comportement
+     * historique).
      */
-    private static boolean cpuSupportsAvx() {
+    private static boolean cpuSupportsAvx2() {
         try {
             com.sun.management.HotSpotDiagnosticMXBean bean =
                     java.lang.management.ManagementFactory.getPlatformMXBean(
                             com.sun.management.HotSpotDiagnosticMXBean.class);
             if (bean == null) return true;
             String v = bean.getVMOption("UseAVX").getValue();
-            return Integer.parseInt(v.trim()) >= 1;
+            return Integer.parseInt(v.trim()) >= 2;
         } catch (Throwable t) {
-            LOG.debug("[ul] Détection AVX impossible ({}), on tente l'init.", t.toString());
+            LOG.debug("[ul] Détection AVX2 impossible ({}), on tente l'init.", t.toString());
             return true;
         }
     }
 
     /**
-     * Pompe un cycle update/render/paint. À appeler depuis {@code Screen.render()} (le
-     * {@link HudRenderCallback} ne tourne pas quand un écran est ouvert). Ne pas appeler en
-     * plus du tick HUD dans la même frame.
+     * Pompe un cycle update/render/paint. Le moteur le fait déjà tout seul à chaque frame tant
+     * qu'un monde est rendu : <b>les mods n'ont normalement pas à appeler ceci</b>.
+     *
+     * <p>⚠️ À n'appeler que depuis un contexte qui n'est PAS une phase d'extraction de la GUI
+     * (donc ni {@code Screen.extractRenderState}, ni un {@code HudElement}) : voir l'en-tête de
+     * cette classe. Un tick client convient.
      */
     public static void renderFrame() { onFrame(); }
 
@@ -142,6 +173,7 @@ public final class UltralightEngine {
         if (!ready || renderer == null) return;
         UltralightCssProbe.tick(); // sonde de diagnostic opt-in
         if (activeViews.isEmpty()) return;
+        long t0 = perfEnabled ? System.nanoTime() : 0L;
         renderer.update();
         for (UltralightBrowserView v : activeViews) {
             v.prepareFrame(); // force la re-rastérisation après input (survol/scroll fluides)
@@ -150,6 +182,7 @@ public final class UltralightEngine {
         for (UltralightBrowserView v : activeViews) {
             v.onRendererTick();
         }
+        if (perfEnabled) { perfNanos += System.nanoTime() - t0; perfFrames++; }
     }
 
     /** Crée une nouvelle vue — render thread. */
