@@ -60,6 +60,24 @@ Pour lancer en dev : `./gradlew runClient` (les natifs se téléchargent, ou pla
 > les dépendances mod se déclarent en `implementation` (plus de `modImplementation`), et il n'y a
 > plus de tâche `remapJar` — le `jar` produit est directement le jar du mod.
 
+### Valider le jar publié (jar-in-jar)
+
+`runClient` résout Luminescence et icu4j depuis le classpath de dev, donc un défaut
+d'empaquetage y reste **invisible**. Pour tester le jar tel que le joueur l'installe, relancer le
+jeu avec un classpath d'où le mod et ses deux dépendances ont été retirés, et le jar ajouté via
+`-Dfabric.addMods` :
+
+1. `./gradlew build` puis `./gradlew runClient` une fois, pour que loom écrive
+   `build/loom-cache/argFiles/runClient` ;
+2. recopier cet argfile en retirant du `-classpath` les entrées `build/classes/java/main`,
+   `build/resources/main`, `luminescence-*.jar` et `icu4j-*.jar` ;
+3. relancer `java` avec cet argfile et `-Dfabric.addMods=build/libs/ultralight-<version>.jar`.
+
+Le log doit annoncer `ultralight <version>` dans la liste des mods chargés. Si l'imbrication est
+cassée, le jeu échoue sur un `NoClassDefFoundError` au lieu de démarrer. En armant la sonde
+(`ULTRALIGHT_PANELPROBE=true`), on vérifie en plus que le mod **fonctionne**, pas seulement
+qu'il se charge.
+
 ### Régénérer les packs de natifs
 Les packs Linux/macOS sont produits et publiés automatiquement par le workflow
 **`.github/workflows/build-luminescence-natives.yml`** (Actions → Run workflow). Le pack

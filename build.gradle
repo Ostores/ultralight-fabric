@@ -42,6 +42,13 @@ dependencies {
 processResources {
     from("NOTICES.md")
     from("LICENSE")
+
+    // La version declaree par le mod doit suivre mod_version, sinon fabric.mod.json annonce
+    // eternellement la meme et les joueurs ne voient pas quelle version ils ont installee.
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
 }
 
 def targetJavaVersion = 25

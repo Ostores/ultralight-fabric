@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "ultralight",
-  "version": "1.0",
+  "version": "${version}",
   "name": "Ultralight API",
   "description": "Ultralight (WebKit) HTML/CSS/JS rendering engine for Fabric mods",
   "authors": ["Ostores"],
