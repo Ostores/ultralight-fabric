@@ -1,6 +1,6 @@
 # ultralight-fabric
 
-Mod-API **Fabric** (client, Minecraft 1.21.11) qui rend du **HTML / CSS / JS** dans une texture
+Mod-API **Fabric** (client, Minecraft **26.2**) qui rend du **HTML / CSS / JS** dans une texture
 Minecraft via **[Ultralight](https://ultralig.ht) 1.4 (WebKit 615 ≈ Safari 16.4)**, exposé pour
 être consommé par d'autres mods.
 
@@ -16,7 +16,8 @@ là où une solution Chromium (MCEF) serait bien plus lourde.
 | Moteur | Ultralight **1.4.0** / WebKit **615** via le binding [Luminescence](https://github.com/Solomon-Team/Luminescence) |
 | Plateformes | ✅ Windows x64 · ✅ Linux x64 · ✅ macOS arm64 *(Intel mac : non encore packagé)* |
 | Rendu | CPU mode → texture MC (BGRA prémultiplié → RGBA straight-alpha, copie native) |
-| Natifs | **téléchargés au 1er lancement** (façon MCEF), pas embarqués → jar léger (~14 Mo) |
+| Natifs | **téléchargés au 1er lancement** (façon MCEF), pas embarqués → jar léger (~15 Mo) |
+| Toolchain | Java **25**, Gradle 9.7, fabric-loom 1.17 (MC 26.x n'est plus obfusqué : ni yarn ni intermediary) |
 
 CSS moderne (WebKit 615) : grid, flexbox `gap`, `aspect-ratio`, `clip-path`,
 `-webkit-backdrop-filter`, `var()`, transitions, `inset`, `overflow:clip`…
@@ -40,18 +41,24 @@ si la version change).
 
 ## Build (développeurs)
 
+Prérequis : **JDK 25** (MC 26.x compile en release 25). Le wrapper Gradle (9.7) se charge du reste.
+
 ```bash
 # 1. Place l'API Luminescence dans libs/ :  libs/luminescence-2026.1.0.jar
 #    (depuis les releases Luminescence)
 # 2. Installe-la dans le Maven local (requise pour le jar-in-jar) :
 scripts/install-luminescence.ps1     # Windows   (ou: bash scripts/install-luminescence.sh)
 # 3. Build :
-./gradlew build                      # → build/libs/ultralight-1.0.jar (~14 Mo, autonome)
+./gradlew build                      # → build/libs/ultralight-1.0.jar (~15 Mo, autonome)
 ```
 
 Le jar embarque l'API Luminescence (LGPL) + icu4j en **jar-in-jar**. Les natifs ne sont **pas**
 nécessaires pour compiler (récupérés au runtime).
 Pour lancer en dev : `./gradlew runClient` (les natifs se téléchargent, ou place-les à la main).
+
+> **MC 26.x n'est plus obfusqué** : plus de mappings yarn ni d'intermediary dans `build.gradle`,
+> les dépendances mod se déclarent en `implementation` (plus de `modImplementation`), et il n'y a
+> plus de tâche `remapJar` — le `jar` produit est directement le jar du mod.
 
 ### Régénérer les packs de natifs
 Les packs Linux/macOS sont produits et publiés automatiquement par le workflow
@@ -61,9 +68,28 @@ sur la release `natives-1.4.0`.
 
 ## API (mods consommateurs)
 
-Entrée : `UltralightEngine.init()` (dans `onInitializeClient`), puis `UltralightBrowserView`
-(loadHTML/URL, pont JS `window.ulQuery`, input souris/clavier, curseurs). Pont JS configurable via
-`UltralightBrowserView.setBridgeName(...)`. Détails + recette d'overlay réactif : **[docs/API.md](docs/API.md)**.
+`UltralightEngine.init()` dans `onInitializeClient`, puis **`UltralightPanel`** : il possède la
+géométrie (taille de vue, `deviceScale`, rectangle de dessin, conversion des coordonnées souris)
+et suit la fenêtre tout seul.
+
+```java
+panel = UltralightPanel.builder()
+        .design(1280, 720)                        // viewport CSS visé par la page
+        .fit(UltralightPanel.Fit.FILL_CLAMPED)    // défaut
+        .build();
+panel.loadHTML(html);
+// Screen.extractRenderState : panel.renderInScreen(graphics);
+```
+
+Trois politiques de mise en page, pour que les interfaces ne cassent plus selon le **ratio
+d'écran** : `FILL` (largeur CSS libre), `CONTAIN` (taille de design garantie, marges), et
+`FILL_CLAMPED` (défaut : responsive mais borné). Le panneau logge à chaque changement le viewport
+CSS réellement fourni à la page, et publie `--ul-vw` / `--ul-vh` / `--ul-aspect` /
+`data-ul-ratio` / l'événement `ul:resize` côté CSS.
+
+En dessous, `UltralightBrowserView` reste accessible (loadHTML/URL, pont JS `window.ulQuery`,
+input, curseurs ; nom du pont configurable via `setBridgeName(...)`).
+Détails : **[docs/API.md](docs/API.md)**.
 
 ## Licences
 

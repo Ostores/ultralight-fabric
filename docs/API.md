@@ -1,6 +1,6 @@
 # Ultralight API — guide d'intégration
 
-Mod-API Fabric (client, MC 1.21.11) qui rend du HTML/CSS/JS dans une texture Minecraft
+Mod-API Fabric (client, MC 26.2) qui rend du HTML/CSS/JS dans une texture Minecraft
 via **Ultralight 1.4 (WebKit 615, ≈ Safari 16.4)** (binding Luminescence). Conçu pour être
 consommé par un autre mod via `mavenLocal()`.
 
@@ -15,12 +15,26 @@ consommé par un autre mod via `mavenLocal()`.
 
 | Méthode | Rôle |
 |---|---|
-| `static void init()` | À appeler dans `onInitializeClient`. Enregistre le pilote de frame ; l'init native (plateforme + renderer) est **différée au 1er frame** (fenêtre/GL prêtes). |
+| `static void init()` | À appeler dans `onInitializeClient`. Enregistre le pilote de frame (`LevelRenderEvents.START_MAIN`, par frame et **avant** la GUI) ; l'init native (plateforme + renderer) est **différée au 1er frame** (fenêtre/GL prêtes). |
 | `static boolean isReady()` | Le moteur est-il prêt. |
-| `static void renderFrame()` | **Pompe un cycle** update/render/paint des vues actives. À appeler depuis `Screen.render()` (voir §4) — sinon, en jeu, le rendu est piloté automatiquement par `HudRenderCallback`. Ne pas appeler en plus du tick HUD dans la même frame. |
+| `static void renderFrame()` | **Pompe un cycle** update/render/paint des vues actives. Normalement **inutile** : le moteur se pompe seul à chaque frame. Ne jamais l'appeler depuis une phase d'extraction de la GUI (voir l'encadré ci-dessous). |
 
-En jeu (pas d'écran ouvert), les vues se mettent à jour seules. Tu n'as besoin de
-`renderFrame()` que pour un overlay rendu pendant qu'un `Screen` est ouvert.
+En jeu, les vues se mettent à jour seules, écran ouvert ou non.
+
+> ### ⚠️ Ne rien pomper pendant la phase d'extraction de la GUI
+>
+> MC 26.x construit l'interface en **deux temps** : extraction de l'état de rendu, puis soumission
+> GPU. Écrire dans une texture GPU au milieu de l'extraction corrompt le lot de dessins de
+> Minecraft. Constaté en jeu, de deux façons spectaculaires :
+>
+> - le **fond de menu** de Minecraft (un quad plein écran tuilé sur une texture 32×32) se met à
+>   échantillonner notre texture : la page apparaît répétée en damier derrière toute la scène ;
+> - une vue dont la largeur égale celle du framebuffer s'affiche en **noir plein**.
+>
+> Les textures produites sont pourtant correctes (vérifié en les vidant sur disque) : le défaut est
+> uniquement dans le *moment* de l'écriture. Le moteur pompe donc depuis
+> `LevelRenderEvents.START_MAIN`. Dans `extractRenderState` et dans un `HudElement`, on ne fait
+> que **dessiner**.
 
 ---
 
@@ -93,10 +107,111 @@ Le handler reçoit une **forme de curseur GLFW** (`GLFW_HAND_CURSOR`, `GLFW_IBEA
 
 ---
 
-## 3. Diagnostic CSS (opt-in)
+## 3. Panneau — `UltralightPanel` (**entrée recommandée**)
+
+`UltralightBrowserView` est la couche basse : c'est toi qui calcules la taille, le `deviceScale`,
+le rectangle de dessin et la conversion des coordonnées souris. `UltralightPanel` fait tout ça, et
+c'est ce qui empêche une interface de **casser selon le ratio d'écran**.
+
+```java
+panel = UltralightPanel.builder()
+        .design(1280, 720)              // le viewport CSS pour lequel la page est écrite
+        .fit(UltralightPanel.Fit.FILL_CLAMPED)   // défaut
+        .build();
+panel.loadHTML(html);
+
+// Screen.extractRenderState(...)
+panel.render(graphics);   // géométrie + dessin
+
+// Screen.mouseClicked(...)
+panel.mouseClicked(click.x(), click.y(), click.button());   // false = clic hors du panneau
+```
+
+### Les trois politiques (`Fit`)
+
+| Mode | Ce que la page reçoit | Quand le choisir |
+|---|---|---|
+| `FILL` | hauteur CSS = design, **largeur CSS libre** (≈750 px en 5:4, ≈1420 px en 21:9) | seulement si le CSS est réellement responsive et testé sur toute la plage |
+| `CONTAIN` | **exactement** la taille de design, toujours | interface au ratio fixe ; marges transparentes sur les écrans larges, zéro risque |
+| `FILL_CLAMPED` *(défaut)* | hauteur CSS = design, largeur CSS **bornée** (défaut 0,72× à 1,25× la largeur de design) | le compromis : responsive dans une plage saine, jamais hors plage |
+
+Hors bornes, `FILL_CLAMPED` centre et laisse des marges (trop large) ou réduit l'échelle (trop
+étroit) : l'interface devient plus petite, elle ne casse pas. Bornes ajustables via
+`.cssWidthRange(min, max)`.
+
+Le panneau **écrit une ligne INFO à chaque changement de géométrie**, pour que tu saches sans
+instrumenter quoi que ce soit ce que ta page reçoit :
+
+```
+[ul-panel] fit=FILL_CLAMPED · vue 2250×1080 px · viewport CSS 1500×720 · deviceScale 1.50 (design 1280×720) · marges 155/0 px (largeur CSS bornée à 1600)
+```
+
+En `FILL`, si la largeur CSS s'écarte de plus de 20/30 % du design, un WARN te le signale une fois
+et te renvoie vers `FILL_CLAMPED` / `CONTAIN`.
+
+### Ce que la page reçoit en plus
+
+À chaque changement de géométrie (et à chaque chargement de page), le panneau publie :
+
+- `--ul-vw`, `--ul-vh`, `--ul-aspect` sur `:root` ;
+- `data-ul-ratio` sur `<html>` : `ultrawide` (≥ 2,1), `wide` (≥ 1,55), `standard` (≥ 1,2), `tall` ;
+- un événement `ul:resize` (`detail = {width, height, aspect, ratio}`).
+
+```css
+:root[data-ul-ratio="ultrawide"] .grid { grid-template-columns: repeat(6, 1fr); }
+:root[data-ul-ratio="tall"]      .grid { grid-template-columns: repeat(2, 1fr); }
+```
+
+### Tester les ratios sans changer de résolution
+
+```java
+panel.setPreviewAspect(21.0 / 9.0);   // simule un 21:9 dans la fenêtre actuelle ; 0 = normal
+```
+
+### Le reste de l'API
+
+| Méthode | Rôle |
+|---|---|
+| `render(graphics)` | depuis `Screen.extractRenderState` **ou** un `HudElement` : géométrie + dessin. Ne pompe pas le moteur. |
+| `mouseMoved/mouseClicked/mouseReleased/mouseScrolled(...)` | coordonnées **logiques MC** ; renvoie `false` hors du panneau |
+| `keyPressed/keyReleased(glfwKey, mods)`, `charTyped(text)` | identiques à la vue |
+| `focus()` / `unfocus()` / `hasInputFocus()` | focus clavier |
+| `contains(x, y)`, `drawX/drawY/drawWidth/drawHeight()` | rectangle occupé, en px logiques |
+| `cssWidth()` / `cssHeight()` | viewport CSS courant |
+| `bounds(x, y, w, h)` *(builder)* | n'occuper qu'une fraction de l'écran |
+| `maxViewPixels(n)` *(builder)* | plafond de résolution (défaut 3840×2160) |
+| `view()` | la `UltralightBrowserView` sous-jacente |
+| `close()` | libère tout |
+
+---
+
+## 4. Diagnostic CSS (opt-in)
 
 Une sonde charge une page de test et logge les capacités CSS réelles + `userAgent`.
 Activable par `-Dultralight.cssprobe=true` ou `ULTRALIGHT_CSSPROBE=true`. Inactive sinon.
+
+### Sonde de géométrie (opt-in)
+
+Parcourt les politiques de `Fit` et des ratios simulés en capturant une copie d'écran par étape
+dans `run/screenshots`. C'est le test de non-régression de la géométrie, du redimensionnement et de
+la règle « rien sur le GPU pendant l'extraction ».
+
+| Drapeau | Effet |
+|---|---|
+| `-Dultralight.panelprobe=true` / `ULTRALIGHT_PANELPROBE=true` | arme la sonde ; elle attend que tu sois en jeu |
+| `ULTRALIGHT_PANELPROBE_WORLD=<dossier>` | charge cette sauvegarde au lieu d'attendre |
+| `ULTRALIGHT_PANELPROBE_QUIT=true` | quitte le jeu à la fin (run automatisé) |
+| `ULTRALIGHT_PANELPROBE_MODE=geometry\|input\|perf\|all` | phases à jouer (défaut `all`) |
+
+La phase **input** injecte de vrais événements à des positions CSS connues et vérifie ce que la
+page a reçu : mapping des coordonnées, cible du clic, hit-test hors panneau, saisie texte, focus,
+curseurs, molette. La phase **perf** compare le temps de frame avec et sans overlay ; couper la
+synchro verticale et relever `maxFps` avant de la lancer, sinon la mesure est plafonnée.
+
+Sans le premier drapeau, **aucun écouteur n'est enregistré** : coût nul dans un jar publié.
+Diagnostic complémentaire : `-Dultralight.dumptexture=true` écrit dans `run/ul-dump/` la texture
+telle qu'on la compose à chaque repaint complet, ce qui distingue un défaut de notre pipeline
+pixel d'un défaut de dessin côté Minecraft.
 
 Capacités WebKit **615** (Safari 16.4) : grid, flexbox `gap`, `aspect-ratio`, `clip-path`,
 `-webkit-backdrop-filter`, `var()`, `inset`, `overflow:clip`, transforms, transitions, filter…
@@ -105,7 +220,7 @@ Perf : en CPU mode, éviter les animations plein écran continues + `backdrop-fi
 
 ---
 
-## 4. Activation / compatibilité
+## 5. Activation / compatibilité
 
 - **Désactivation manuelle** : `-Dultralight.disable=true` (ou `ULTRALIGHT_DISABLE=true`) coupe
   totalement le rendu HTML — aucun natif n'est téléchargé ni chargé. `UltralightEngine.isReady()`
@@ -117,23 +232,26 @@ Perf : en CPU mode, éviter les animations plein écran continues + `backdrop-fi
 
 ---
 
-## 4. Recette : overlay web réactif dans un `Screen`
+## 6. Recette manuelle (sans `UltralightPanel`)
 
-Voir l'exemple complet et validé dans **`reference/overlay-example/`**.
+> `UltralightPanel` (§3) fait tout ce qui suit à ta place. Cette section documente la mécanique
+> pour qui veut piloter la géométrie lui-même. Exemple complet : **`reference/overlay-example/`**.
 
 Points qui font qu'un overlay s'adapte à la **fenêtre** (et pas au réglage « GUI Scale ») :
 
-1. **Taille = pixels physiques du framebuffer**, pas l'espace logique GUI :
+1. **Taille = pixels physiques de la fenêtre**, pas l'espace logique GUI :
    ```java
-   int fbW = window.getFramebufferWidth(), fbH = window.getFramebufferHeight();
+   int fbW = window.getWidth(), fbH = window.getHeight();   // pixels physiques (MC 26.x)
    double deviceScale = Math.max(1.0, fbH / 600.0);   // CSS voit ~600px de haut, constant
    view = new UltralightBrowserView(fbW, fbH, deviceScale);
    ```
-2. **Pompe le moteur** dans `render()` : `UltralightEngine.renderFrame();` (le HUD ne tourne pas pendant un écran).
-3. **Dessin net** (1 texel = 1 px physique) via la surcharge région :
+   (`window.getGuiScaledWidth/Height` est l'espace logique « GUI Scale » — ce n'est PAS ce qu'on veut ici.)
+2. **Ne pompe pas le moteur** depuis `extractRenderState()` : il tourne déjà avant la GUI, et y
+   écrire dans une texture GPU casse le rendu (voir §1).
+3. **Dessin net** (1 texel = 1 px physique) via la surcharge région de `blit` :
    ```java
-   ctx.drawTexture(RenderPipelines.GUI_TEXTURED, id,
-                   0, 0, 0f, 0f, this.width, this.height, fbW, fbH, fbW, fbH);
+   graphics.blit(RenderPipelines.GUI_TEXTURED, id,
+                 0, 0, 0f, 0f, this.width, this.height, fbW, fbH, fbW, fbH);
    // drawW/drawH = taille logique écran ; regionW/regionH = texW/texH = taille physique
    ```
 4. ⚠️ **PIÈGE — coordonnées souris en pixels CSS**, pas device. Ultralight attend
@@ -145,9 +263,18 @@ Points qui font qu'un overlay s'adapte à la **fenêtre** (et pas au réglage «
    (Invisible si `deviceScale == 1`, casse l'input sinon.)
 5. **Resize** : refais 1. dans `Screen.init()` (rappelé au redimensionnement).
 
+> **MC 26.x — ce qui a changé côté écran.** Les `Screen` ne dessinent plus dans
+> `render(DrawContext…)` : ils remplissent un état de rendu dans
+> `extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick)`,
+> soumis au GPU ensuite. L'input passe par des records :
+> `mouseClicked(MouseButtonEvent, boolean)` / `mouseReleased(MouseButtonEvent)` (`e.x()`, `e.y()`,
+> `e.button()`), `keyPressed/keyReleased(KeyEvent)` (`e.key()`, `e.modifiers()`),
+> `charTyped(CharacterEvent)` (`e.codepointAsString()`). Voir
+> [`reference/overlay-example/`](../reference/overlay-example/) pour la version compilable.
+
 ---
 
-## 5. Contenu dynamique
+## 7. Contenu dynamique
 
 ### Ce qui marche (recommandé)
 - **`loadHTML(String)`** avec CSS/JS inline + données injectées → couvre la plupart des UIs.
