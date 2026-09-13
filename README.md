@@ -34,9 +34,10 @@ si la version change).
 - Base de téléchargement surchargeable : `-Dultralight.natives.url=<url/>`.
 - Dev hors-ligne : place les natifs dans `<gameDir>/ultralight-1.4/bin` → le téléchargement est ignoré.
 - Désactivation manuelle du rendu HTML : `-Dultralight.disable=true` (ou `ULTRALIGHT_DISABLE=true`).
-- **CPU sans AVX** (Intel pré-2011 / AMD pré-Bulldozer) : les natifs WebKit 615 sont compilés avec
-  AVX → le rendu HTML se **désactive automatiquement** sur ces machines (au lieu de crasher).
-  Bypass de test : `-Dultralight.skipCpuCheck=true` (⚠️ re-crashe sur un vrai CPU sans AVX).
+- **CPU sans AVX2** (Intel Ivy Bridge et antérieur / AMD pré-Excavator) : les natifs WebKit 615
+  utilisent des instructions **AVX2** → le rendu HTML se **désactive automatiquement** sur ces
+  machines (au lieu de crasher). Bypass de test : `-Dultralight.skipCpuCheck=true`
+  (⚠️ re-crashe sur un vrai CPU sans AVX2).
 
 ## Build (développeurs)
 

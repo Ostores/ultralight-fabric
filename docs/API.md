@@ -110,9 +110,10 @@ Perf : en CPU mode, éviter les animations plein écran continues + `backdrop-fi
 - **Désactivation manuelle** : `-Dultralight.disable=true` (ou `ULTRALIGHT_DISABLE=true`) coupe
   totalement le rendu HTML — aucun natif n'est téléchargé ni chargé. `UltralightEngine.isReady()`
   reste `false` ; les mods consommateurs doivent le vérifier avant d'ouvrir une vue.
-- **Garde-fou AVX** : les natifs WebKit 615 sont compilés avec AVX. Sur un CPU sans AVX (Intel
-  pré-2011 / AMD pré-Bulldozer), la 1re instruction AVX lèverait un `SIGILL` natif = crash JVM dur.
-  Le moteur détecte l'absence d'AVX (flag HotSpot `UseAVX`) et **désactive le rendu HTML** au lieu
+- **Garde-fou AVX2** : les natifs WebKit 615 utilisent des instructions AVX2 (p.ex. `VPSRAVD`),
+  pas seulement AVX. Sur un CPU avec AVX mais sans AVX2 (Intel Ivy Bridge et antérieur / AMD
+  pré-Excavator), la 1re instruction AVX2 lèverait un `SIGILL` natif = crash JVM dur.
+  Le moteur lit le flag HotSpot `UseAVX` (>= 2 requis) et **désactive le rendu HTML** au lieu
   de crasher. Forçage (tests) : `-Dultralight.skipCpuCheck=true`.
 
 ---
