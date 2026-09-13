@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom' version '1.16-SNAPSHOT'
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
     id 'maven-publish'
 }
 
@@ -23,9 +23,11 @@ repositories {
 
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    mappings  "net.fabricmc:yarn:${project.yarn_mappings}:v2"
-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    // Plus de `mappings` : depuis MC 26.x, Mojang publie un jar non obfusqué, donc ni yarn
+    // ni intermediary. Les dépendances mod n'ont plus besoin d'être remappées non plus
+    // (`implementation` au lieu de `modImplementation`).
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 
     // API Java Luminescence (LGPL-3.0) + icu4j : jar-in-jar (`include`) → nested, séparables
     // (LGPL-clean). Voir docs/Building pour installer l'API Luminescence en mavenLocal.
@@ -42,24 +44,20 @@ processResources {
     from("LICENSE")
 }
 
-def targetJavaVersion = 21
+def targetJavaVersion = 25
 tasks.withType(JavaCompile).configureEach {
     it.options.encoding = "UTF-8"
-    if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
-        it.options.release.set(targetJavaVersion)
-    }
+    it.options.release.set(targetJavaVersion)
 }
 
 java {
-    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
-    if (JavaVersion.current() < javaVersion) {
-        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
-    }
+    toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
     withSourcesJar()
 }
 
-// Publication Maven locale — le mod consommateur référence ce mod via mavenLocal()
-// Publie aussi le -dev.jar (intermediary) que Loom utilise pour la compilation côté dépendant.
+// Publication Maven locale — le mod consommateur référence ce mod via mavenLocal().
+// Sans remapping (MC 26.x non obfusqué), le jar publié est directement consommable :
+// plus besoin du -dev.jar intermediary d'autrefois.
 publishing {
     publications {
         create("mavenJava", MavenPublication) {
@@ -67,9 +65,7 @@ publishing {
             artifactId = project.archives_base_name
             version    = project.mod_version
 
-            artifact(remapJar) { builtBy remapJar }
-            artifact(jar)      { builtBy jar; classifier "dev" }
-            artifact(sourcesJar) { builtBy remapSourcesJar; classifier "sources" }
+            from components.java
         }
     }
     repositories {
