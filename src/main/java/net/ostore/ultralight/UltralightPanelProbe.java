@@ -234,6 +234,14 @@ final class UltralightPanelProbe {
             panel.setCursorHandler(shape -> cursorShape = shape);
             if (inputHtml != null) panel.loadHTML(inputHtml);
             panel.focus();
+
+            // Simule un DEUXIEME mod consommateur : la doc dit a chacun d'appeler init(). Si
+            // l'enregistrement du pilote de frame n'est pas idempotent, le moteur sera pompe deux
+            // fois par frame, ce que checkSinglePump() detectera.
+            UltralightEngine.init();
+            UltralightEngine.perfEnabled = true;
+            UltralightEngine.perfReset();
+
             frames = 0;
             LOG.info("[ul-panelprobe] phase input - injection a des positions CSS connues.");
         }
@@ -251,6 +259,7 @@ final class UltralightPanelProbe {
             if (!UltralightEngine.isReady() || panel.cssWidth() <= 0) return;
             frames++;
             switch (frames) {
+                case 30  -> checkGuards();
                 case 40  -> panel.mouseMoved(logX(640), logY(40));            // zone neutre
                 case 50  -> panel.mouseMoved(logX(200), logY(130));           // sur le bouton
                 case 60  -> check("souris mappee", "move", 200, 130);
@@ -268,12 +277,58 @@ final class UltralightPanelProbe {
                 case 134 -> panel.mouseMoved(logX(350), logY(500));           // zone defilable
                 case 138 -> panel.mouseScrolled(logX(350), logY(500), 0, -3);
                 case 150 -> checkScroll();
-                case 158 -> {
+                case 158 -> checkSinglePump();
+                case 168 -> {
+                    UltralightEngine.perfEnabled = false;
                     report();
                     if (runPerf() && !perfPhase) { inputPhase = false; startPerfPhase(); }
                     else finish();
                 }
                 default  -> { }
+            }
+        }
+
+        /** Les garde-fous doivent refuser les entrees absurdes, et le dire. */
+        private void checkGuards() {
+            try {
+                new UltralightBrowserView(0, 100, 1.0);
+                fail("garde-fou taille de vue", "une vue 0x100 a ete acceptee");
+            } catch (IllegalArgumentException e) {
+                pass("garde-fou taille de vue", "refusee comme prevu");
+            } catch (Throwable t) {
+                fail("garde-fou taille de vue", "exception inattendue : " + t);
+            }
+
+            try {
+                UltralightPanel.builder().bounds(0.5f, 0f, 0.8f, 1f).build();
+                fail("garde-fou bounds", "un rectangle debordant de [0,1] a ete accepte");
+            } catch (IllegalArgumentException e) {
+                pass("garde-fou bounds", "refuse comme prevu");
+            }
+
+            try {
+                panel.view().setBridgeName("mauvais'nom");
+                fail("garde-fou nom de pont", "un nom non-identifiant a ete accepte");
+            } catch (IllegalArgumentException e) {
+                pass("garde-fou nom de pont", "refuse comme prevu");
+            }
+        }
+
+        /**
+         * Le moteur doit etre pompe UNE fois par frame, meme apres un second appel a init().
+         * On compare le compteur de cycles du moteur au nombre de frames rendues par la sonde.
+         */
+        private void checkSinglePump() {
+            long pumps = UltralightEngine.perfFrameCount();
+            long rendered = frames;
+            // Les deux compteurs ne s'incrementent pas au meme point de la frame : on tolere un
+            // ecart de quelques unites, mais surement pas un facteur deux.
+            if (Math.abs(pumps - rendered) <= 5) {
+                pass("un seul pompage par frame", pumps + " cycles pour " + rendered + " frames");
+            } else {
+                fail("un seul pompage par frame",
+                        pumps + " cycles pour " + rendered + " frames rendues"
+                        + (pumps > rendered * 1.5 ? " (init() n'est pas idempotent)" : ""));
             }
         }
 

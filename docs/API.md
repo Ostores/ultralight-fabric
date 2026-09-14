@@ -70,8 +70,12 @@ l'alpha straight dé-prémultiplié ; **n'utilise PAS** `GUI_TEXTURED_PREMULTIPL
 (zones semi-transparentes délavées).
 
 ### Pont JS ↔ Java
-Côté page : `window.ulQuery(data)` (fonction native, injectée à chaque chargement ;
-nom configurable via `UltralightBrowserView.setBridgeName("…")`).
+Côté page : `window.ulQuery(data)` (fonction native, injectée à chaque chargement).
+
+Le nom est réglable **par vue** via `view.setBridgeName("…")`, ou à la construction du panneau
+via `.bridgeName("…")`. Il existe aussi `UltralightBrowserView.setDefaultBridgeName("…")`, mais
+c'est un réglage **global au jeu** : si deux mods l'appellent, le dernier casse le pont de l'autre.
+Le nom doit être un identifiant JavaScript, il est injecté dans `window['<nom>']`.
 Côté Java :
 ```java
 view.setQueryHandler(msg -> { /* msg = la string passée à ulQuery, sur le render thread */ });
@@ -180,6 +184,7 @@ panel.setPreviewAspect(21.0 / 9.0);   // simule un 21:9 dans la fenêtre actuell
 | `cssWidth()` / `cssHeight()` | viewport CSS courant |
 | `bounds(x, y, w, h)` *(builder)* | n'occuper qu'une fraction de l'écran |
 | `maxViewPixels(n)` *(builder)* | plafond de résolution (défaut 3840×2160) |
+| `bridgeName(nom)` *(builder)* | nom de la fonction de pont, propre à ce panneau |
 | `view()` | la `UltralightBrowserView` sous-jacente |
 | `close()` | libère tout |
 

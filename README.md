@@ -106,7 +106,7 @@ CSS réellement fourni à la page, et publie `--ul-vw` / `--ul-vh` / `--ul-aspec
 `data-ul-ratio` / l'événement `ul:resize` côté CSS.
 
 En dessous, `UltralightBrowserView` reste accessible (loadHTML/URL, pont JS `window.ulQuery`,
-input, curseurs ; nom du pont configurable via `setBridgeName(...)`).
+input, curseurs ; nom du pont réglable par vue via `setBridgeName(...)`).
 Détails : **[docs/API.md](docs/API.md)**.
 
 ## Licences
