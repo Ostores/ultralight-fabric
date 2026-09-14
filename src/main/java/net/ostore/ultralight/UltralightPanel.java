@@ -81,6 +81,7 @@ public final class UltralightPanel implements AutoCloseable {
     private final int minCssW, maxCssW;
     private final long maxViewPixels;
     private final float boundsX, boundsY, boundsW, boundsH;
+    private final String bridgeName;   // null = défaut de la bibliothèque
 
     // ── état géométrique courant ──
     private UltralightBrowserView view;
@@ -92,7 +93,9 @@ public final class UltralightPanel implements AutoCloseable {
     private double previewAspect = 0.0;          // > 0 : simulation de ratio (mode test)
 
     // ── resize temporisé (un drag de fenêtre ne doit pas réallouer par frame) ──
-    private static final long RESIZE_SETTLE_MS = 120L;
+    // Horloge monotone et pas horloge murale : on mesure une duree, et un ajustement NTP
+    // retarderait ou declencherait un redimensionnement au hasard.
+    private static final long RESIZE_SETTLE_NANOS = 120L * 1_000_000L;
     private int pendingPW, pendingPH;
     private double pendingScale;
     private long pendingSince;
@@ -116,6 +119,7 @@ public final class UltralightPanel implements AutoCloseable {
         this.boundsY       = b.boundsY;
         this.boundsW       = b.boundsW;
         this.boundsH       = b.boundsH;
+        this.bridgeName    = b.bridgeName;
     }
 
     public static Builder builder() { return new Builder(); }
@@ -126,6 +130,7 @@ public final class UltralightPanel implements AutoCloseable {
         private int minCssW = 0, maxCssW = 0;
         private long maxViewPixels = 3840L * 2160L;
         private float boundsX = 0f, boundsY = 0f, boundsW = 1f, boundsH = 1f;
+        private String bridgeName = null;
 
         /** Viewport CSS pour lequel la page est écrite. Défaut 1280×720. */
         public Builder design(int cssWidth, int cssHeight) {
@@ -160,8 +165,23 @@ public final class UltralightPanel implements AutoCloseable {
          * écran. Utile pour un panneau/dialogue qui ne prend qu'une partie de la fenêtre.
          */
         public Builder bounds(float x, float y, float width, float height) {
+            // design() et cssWidthRange() valident deja : des fractions aberrantes ici donnaient un
+            // rectangle absurde sans un mot.
+            float eps = 1e-4f;
+            if (!(x >= -eps && y >= -eps && width > 0f && height > 0f
+                    && x + width <= 1f + eps && y + height <= 1f + eps)) {
+                throw new IllegalArgumentException(String.format(java.util.Locale.ROOT,
+                        "bounds hors de [0,1] : x=%.3f y=%.3f w=%.3f h=%.3f", x, y, width, height));
+            }
             this.boundsX = x; this.boundsY = y; this.boundsW = width; this.boundsH = height; return this;
         }
+
+        /**
+         * Nom de la fonction JS du pont pour ce panneau ({@code window.<nom>(data)}). Par défaut,
+         * celui de la bibliothèque. À définir ici plutôt que globalement : deux mods qui règlent le
+         * nom global se cassent mutuellement le pont.
+         */
+        public Builder bridgeName(String name) { this.bridgeName = name; return this; }
 
         public UltralightPanel build() { return new UltralightPanel(this); }
     }
@@ -334,13 +354,13 @@ public final class UltralightPanel implements AutoCloseable {
                 && Math.abs(newScale - deviceScale) < 1e-4;
         if (same) { pendingSince = 0L; return; }
 
-        long now = System.currentTimeMillis();
+        long now = System.nanoTime();
         if (pendingSince == 0L || newPW != pendingPW || newPH != pendingPH
                 || Math.abs(newScale - pendingScale) > 1e-4) {
             pendingPW = newPW; pendingPH = newPH; pendingScale = newScale; pendingSince = now;
             return;                                   // on attend que ça se stabilise
         }
-        if (now - pendingSince < RESIZE_SETTLE_MS) return;
+        if (now - pendingSince < RESIZE_SETTLE_NANOS) return;
 
         pendingSince = 0L;
         viewPW = newPW; viewPH = newPH; deviceScale = newScale;
@@ -353,6 +373,7 @@ public final class UltralightPanel implements AutoCloseable {
         if (!UltralightEngine.isReady()) return;
         viewPW = pw; viewPH = ph; deviceScale = scale;
         view = new UltralightBrowserView(pw, ph, scale);
+        if (bridgeName    != null) view.setBridgeName(bridgeName);
         if (queryHandler  != null) view.setQueryHandler(queryHandler);
         if (cursorHandler != null) view.setCursorHandler(cursorHandler);
         view.setOnPageReadyCallback(wrapPageReady(pageReadyCallback));

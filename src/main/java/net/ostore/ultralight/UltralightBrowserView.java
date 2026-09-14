@@ -51,11 +51,32 @@ public final class UltralightBrowserView {
 
     private static final Logger LOG = LoggerFactory.getLogger("ultralight/view");
 
-    /** Nom de la fonction JS du pont (côté page : {@code window.<name>(data)}). Défaut neutre. */
-    private static volatile String bridgeName = "ulQuery";
-    /** Change le nom global de la fonction de pont JS (prend effet aux prochains chargements de page). */
-    public static void setBridgeName(String name) {
-        if (name != null && !name.isEmpty()) bridgeName = name;
+    /** Nom par défaut de la fonction JS du pont, pour les vues créées ensuite. */
+    private static volatile String defaultBridgeName = "ulQuery";
+
+    /**
+     * Change le nom de pont par défaut des <b>prochaines</b> vues.
+     *
+     * <p>⚠️ C'est un réglage <b>global au jeu</b> : si deux mods l'appellent, le dernier gagne et
+     * casse le pont de l'autre. Pour une bibliothèque partagée, préférer
+     * {@link #setBridgeName(String)} sur la vue, ou {@code UltralightPanel.Builder.bridgeName(...)}.
+     */
+    public static void setDefaultBridgeName(String name) {
+        defaultBridgeName = validateBridgeName(name, defaultBridgeName);
+    }
+
+    /**
+     * Le nom est concaténé dans du JS ({@code window['<nom>']}) : un nom contenant une apostrophe
+     * casserait le script, voire y injecterait du code. On n'accepte donc qu'un identifiant.
+     */
+    private static String validateBridgeName(String name, String fallback) {
+        if (name == null || name.isEmpty()) return fallback;
+        if (!name.matches("[A-Za-z_$][A-Za-z0-9_$]*")) {
+            throw new IllegalArgumentException(
+                    "Nom de pont JS invalide : « " + name + " ». Attendu un identifiant JavaScript "
+                    + "([A-Za-z_$][A-Za-z0-9_$]*), le nom étant injecté dans window['<nom>'].");
+        }
+        return name;
     }
 
     /** recip[a] ≈ (255/a) << 16 — dé-prémultiplication sans division par pixel. */
@@ -82,6 +103,8 @@ public final class UltralightBrowserView {
     private static final int REPAINT_AFTER_INPUT = 12;
 
     // JS bridge + curseur
+    /** Nom du pont pour CETTE vue : deux mods peuvent ainsi cohabiter sans se marcher dessus. */
+    private volatile String bridgeName = defaultBridgeName;
     private volatile Consumer<String> queryHandler;
     private volatile IntConsumer cursorHandler;
 
@@ -89,11 +112,32 @@ public final class UltralightBrowserView {
     private final AtomicBoolean pageReady = new AtomicBoolean(false);
     private Consumer<Void> onPageReadyCallback;
 
+    /**
+     * @throws IllegalStateException si le moteur n'est pas encore prêt. L'initialisation native est
+     *         différée au premier frame rendu : créer une vue avant (typiquement depuis
+     *         {@code onInitializeClient}) passerait un renderer nul au code natif, ce qui produit
+     *         un {@code ACCESS_VIOLATION}, donc un crash JVM impossible à rattraper. Mieux vaut
+     *         une exception claire. {@link UltralightPanel} gère cette attente tout seul.
+     */
     public UltralightBrowserView(int width, int height, double deviceScale) {
+        if (!UltralightEngine.isReady()) {
+            throw new IllegalStateException(
+                    "UltralightEngine n'est pas prêt : l'init native est différée au 1er frame rendu. "
+                    + "Vérifier UltralightEngine.isReady() avant de créer une vue, ou utiliser "
+                    + "UltralightPanel qui attend pour vous.");
+        }
+        if (width <= 0 || height <= 0) {
+            throw new IllegalArgumentException("Taille de vue invalide : " + width + "x" + height);
+        }
         this.viewId = UltralightEngine.VIEW_COUNTER.getAndIncrement();
         this.view   = UltralightEngine.createView(width, height, true, deviceScale);
         this.view.setListener(new BridgeListener());
         UltralightEngine.registerView(this);
+    }
+
+    /** Nom de la fonction JS du pont pour cette vue. Prend effet au prochain chargement de page. */
+    public void setBridgeName(String name) {
+        this.bridgeName = validateBridgeName(name, this.bridgeName);
     }
 
     // =========================================================================
@@ -355,6 +399,13 @@ public final class UltralightBrowserView {
             textureReady = true;
             if (full && DUMP_TEXTURE) dumpTexture(w, h, srcStride, surface.getRowBytes() / 4);
         } catch (Throwable t) {
+            // Un echec de peinture durable se traduit par un ecran vide. En debug seul, personne ne
+            // le voit : on le signale une fois au niveau par defaut.
+            if (!paintFailureWarned) {
+                paintFailureWarned = true;
+                LOG.warn("[ul-view:{}] echec de peinture, la vue ne se mettra plus a jour : {}",
+                        viewId, t.toString());
+            }
             LOG.debug("[ul-view:{}] paint: {}", viewId, t.getMessage());
         } finally {
             surface.clearDirtyBounds();
@@ -413,6 +464,8 @@ public final class UltralightBrowserView {
 
     /** Repli d'upload déjà signalé (on ne veut pas un log par frame). */
     private boolean bandUploadFallbackWarned = false;
+    /** Échec de peinture déjà signalé (idem). */
+    private boolean paintFailureWarned = false;
 
     private int[] blitRow; // tampon de ligne réutilisé (évite la réallocation)
 
@@ -450,33 +503,59 @@ public final class UltralightBrowserView {
     private void ensureMcTexture(int w, int h) {
         if (mcTexture != null) return;
         long bytes = (long) w * h * 4L;
-        pixelBuffer = MemoryUtil.memAlloc((int) bytes);
-        pixelInts   = pixelBuffer.order(ByteOrder.nativeOrder()).asIntBuffer();
-        NativeImage img = new NativeImage(NativeImage.Format.RGBA, w, h, false,
-                MemoryUtil.memAddress(pixelBuffer));
-        mcTexture     = new DynamicTexture(() -> "ul_view_" + viewId, img);
-        texIdentifier = Identifier.fromNamespaceAndPath("ultralight", "ul_view_" + viewId);
-        texW = w;
-        texH = h;
-        Minecraft mc = Minecraft.getInstance();
-        if (mc != null) mc.getTextureManager().register(texIdentifier, mcTexture);
-        needsFullUpload = true;
+        // memAlloc prend un int : au-dela de 2 Go la conversion tronquerait silencieusement et on
+        // ecrirait hors du tampon. On refuse, en le disant.
+        if (bytes <= 0L || bytes > Integer.MAX_VALUE) {
+            if (!textureTooLargeWarned) {
+                textureTooLargeWarned = true;
+                LOG.error("[ul-view:{}] taille de vue irrealiste ({}x{} = {} octets) : rendu abandonne. "
+                        + "Plafonner la resolution (UltralightPanel.Builder.maxViewPixels).",
+                        viewId, w, h, bytes);
+            }
+            return;
+        }
+
+        ByteBuffer buf = MemoryUtil.memAlloc((int) bytes);
+        NativeImage img = null;
+        try {
+            // Des que la NativeImage detient l'adresse, c'est SA fermeture qui libere le tampon.
+            img = new NativeImage(NativeImage.Format.RGBA, w, h, false, MemoryUtil.memAddress(buf));
+            DynamicTexture tex = new DynamicTexture(() -> "ul_view_" + viewId, img);
+            Identifier id = Identifier.fromNamespaceAndPath("ultralight", "ul_view_" + viewId);
+            Minecraft mc = Minecraft.getInstance();
+            if (mc != null) mc.getTextureManager().register(id, tex);
+
+            pixelBuffer   = buf;
+            pixelInts     = buf.order(ByteOrder.nativeOrder()).asIntBuffer();
+            mcTexture     = tex;
+            texIdentifier = id;
+            texW = w;
+            texH = h;
+            needsFullUpload = true;
+        } catch (Throwable t) {
+            // Sans ceci, un echec apres l'allocation fuirait le tampon natif a chaque tentative.
+            if (img != null) img.close(); else MemoryUtil.memFree(buf);
+            LOG.error("[ul-view:{}] creation de texture echouee ({}x{})", viewId, w, h, t);
+        }
     }
 
+    /** Refus de taille deja signale. */
+    private boolean textureTooLargeWarned = false;
+
     private void destroyMcTexture() {
-        if (texIdentifier != null) {
-            Identifier id = texIdentifier;
-            texIdentifier = null;
-            mcTexture     = null;
-            Minecraft mc = Minecraft.getInstance();
-            if (mc != null) mc.getTextureManager().release(id);
+        Minecraft mc = Minecraft.getInstance();
+        // release() ferme la texture, donc la NativeImage, donc libere notre tampon natif. Sans
+        // TextureManager (arret du jeu), on ferme nous-memes : sinon le tampon fuit.
+        if (texIdentifier != null && mc != null) {
+            mc.getTextureManager().release(texIdentifier);
         } else if (mcTexture != null) {
             mcTexture.close();
-            mcTexture = null;
         }
-        texW = texH = 0;
-        pixelInts   = null;
-        pixelBuffer = null;
+        texIdentifier = null;
+        mcTexture     = null;
+        texW = texH   = 0;
+        pixelInts     = null;
+        pixelBuffer   = null;
     }
 
     // =========================================================================

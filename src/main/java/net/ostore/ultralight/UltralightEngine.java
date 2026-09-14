@@ -35,6 +35,8 @@ public final class UltralightEngine {
 
     private static volatile boolean ready = false;
     private static boolean initAttempted = false;
+    /** Le pilote de frame n'est enregistré qu'une fois, quel que soit le nombre d'appels à init(). */
+    private static boolean frameDriverRegistered = false;
     private static ULRenderer renderer;
 
     /** Vues actives — notifiées à chaque frame (render thread). */
@@ -69,6 +71,15 @@ public final class UltralightEngine {
      * n'existe pas encore et créer le renderer Ultralight 1.4 y plante (ACCESS_VIOLATION).
      */
     public static void init() {
+        // IDEMPOTENT : cette bibliothèque est faite pour être consommée par plusieurs mods, et la
+        // doc dit à chacun d'appeler init(). Sans ce garde-fou, deux mods = deux écouteurs = le
+        // moteur pompé deux fois par frame (double update/render, double peinture, double upload).
+        if (frameDriverRegistered) {
+            LOG.debug("[ul] init() rappelé — le pilote de frame est déjà en place, on ignore.");
+            return;
+        }
+        frameDriverRegistered = true;
+
         // Pompe par frame, dans la phase de rendu du monde et donc AVANT la construction de la GUI.
         // Surtout pas depuis un élément de HUD ni depuis Screen.extractRenderState : ce sont des
         // phases d'extraction, et y écrire dans une texture GPU casse le rendu (voir en-tête).
