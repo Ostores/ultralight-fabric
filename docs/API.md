@@ -105,6 +105,19 @@ Perf : en CPU mode, éviter les animations plein écran continues + `backdrop-fi
 
 ---
 
+## 4. Activation / compatibilité
+
+- **Désactivation manuelle** : `-Dultralight.disable=true` (ou `ULTRALIGHT_DISABLE=true`) coupe
+  totalement le rendu HTML — aucun natif n'est téléchargé ni chargé. `UltralightEngine.isReady()`
+  reste `false` ; les mods consommateurs doivent le vérifier avant d'ouvrir une vue.
+- **Garde-fou AVX2** : les natifs WebKit 615 utilisent des instructions AVX2 (p.ex. `VPSRAVD`),
+  pas seulement AVX. Sur un CPU avec AVX mais sans AVX2 (Intel Ivy Bridge et antérieur / AMD
+  pré-Excavator), la 1re instruction AVX2 lèverait un `SIGILL` natif = crash JVM dur.
+  Le moteur lit le flag HotSpot `UseAVX` (>= 2 requis) et **désactive le rendu HTML** au lieu
+  de crasher. Forçage (tests) : `-Dultralight.skipCpuCheck=true`.
+
+---
+
 ## 4. Recette : overlay web réactif dans un `Screen`
 
 Voir l'exemple complet et validé dans **`reference/overlay-example/`**.
