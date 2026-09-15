@@ -64,12 +64,15 @@ final class UltralightPanelProbe {
     private static String modeOrDefault(String v) {
         if (v == null) return "all";
         String m = v.trim().toLowerCase(java.util.Locale.ROOT);
-        return (m.equals("geometry") || m.equals("input") || m.equals("perf")) ? m : "all";
+        return (m.equals("geometry") || m.equals("input") || m.equals("perf")
+                || m.equals("typing")) ? m : "all";
     }
 
     private static boolean runGeometry() { return MODE.equals("all") || MODE.equals("geometry"); }
     private static boolean runInput()    { return MODE.equals("all") || MODE.equals("input"); }
     private static boolean runPerf()     { return MODE.equals("all") || MODE.equals("perf"); }
+    /** Phase manuelle : jamais dans "all", elle attend une frappe humaine. */
+    private static boolean runTyping()   { return MODE.equals("typing"); }
 
     private static boolean flag(String property, String envName) {
         return Boolean.getBoolean(property) || "true".equalsIgnoreCase(System.getenv(envName));
@@ -172,6 +175,10 @@ final class UltralightPanelProbe {
         private final List<String> results = new ArrayList<>();
         private volatile CursorType cursorShape = null;
 
+        // -- phase typing (frappe reelle) --
+        private boolean typingPhase = false;
+        private String lastTyped = "";
+
         // -- phase perf --
         private boolean perfPhase = false;
         private String perfHtml;
@@ -193,6 +200,7 @@ final class UltralightPanelProbe {
         private void nextStep() {
             if (panel != null) { panel.close(); panel = null; }
             step++;
+            if (runTyping() && !typingPhase) { startTypingPhase(); return; }
             if (!runGeometry() || step >= STEPS.length) {
                 if (runInput() && !inputPhase) { startInputPhase(); return; }
                 if (runPerf()  && !perfPhase)  { startPerfPhase();  return; }
@@ -334,6 +342,57 @@ final class UltralightPanelProbe {
             }
         }
 
+        /**
+         * Ouvre la page de saisie et attend une frappe HUMAINE. La phase input tape en
+         * synthetique, ce qui contourne le backend SDL : seule une vraie frappe prouve que la
+         * notification a TextInputManager evite la desynchronisation annoncee par Fabric.
+         */
+        private void startTypingPhase() {
+            typingPhase = true;
+            lastTyped = "";
+            panel = UltralightPanel.builder()
+                    .design(1280, 720)
+                    .fit(UltralightPanel.Fit.CONTAIN)
+                    .build();
+            if (inputHtml != null) panel.loadHTML(inputHtml);
+            panel.focus();
+            frames = 0;
+            LOG.info("[ul-panelprobe] phase TYPING : clique dans le champ texte, puis tape au clavier.");
+            LOG.info("[ul-panelprobe] (le champ est a ~250,220 en CSS ; la sonde s'arrete des que 3 caracteres arrivent)");
+        }
+
+        private void typingTick() {
+            if (!UltralightEngine.isReady() || panel.view() == null) return;
+            frames++;
+
+            // Au demarrage, on place le curseur dans le champ pour que l'humain n'ait qu'a taper.
+            if (frames == 60) {
+                panel.mouseMoved(logX(250), logY(220));
+                panel.mouseClicked(logX(250), logY(220), InputConstants.MOUSE_BUTTON_LEFT);
+                panel.mouseReleased(logX(250), logY(220), InputConstants.MOUSE_BUTTON_LEFT);
+                LOG.info("[ul-panelprobe] champ focalise (hasInputFocus={}) — a toi de taper.",
+                        panel.hasInputFocus());
+            }
+
+            if (frames % 20 != 0) return;
+            String v = panel.view().evalString("document.getElementById('txt').value");
+            if (v == null) v = "";
+            if (!v.equals(lastTyped)) {
+                lastTyped = v;
+                LOG.info("[ul-panelprobe] champ = \"{}\"", v);
+            }
+            if (v.length() >= 3) {
+                pass("saisie clavier REELLE (chemin SDL)", "recu \"" + v + "\"");
+                report();
+                finish();
+            } else if (frames > 12000) {  // ~3 min : le temps 'un humain tape
+                fail("saisie clavier REELLE (chemin SDL)",
+                        "rien recu en 60 s — TextInputManager probablement desynchronise");
+                report();
+                finish();
+            }
+        }
+
         private void pass(String what, String detail) {
             results.add("PASS " + what);
             LOG.info("[ul-panelprobe]   PASS {} - {}", what, detail);
@@ -456,6 +515,7 @@ final class UltralightPanelProbe {
             if (panel == null) return;
             panel.render(graphics);
 
+            if (typingPhase) { typingTick(); return; }
             if (inputPhase) { inputTick(); return; }
 
             if (!UltralightEngine.isReady()) return;   // init native en cours : on ne compte pas
@@ -573,6 +633,28 @@ final class UltralightPanelProbe {
             LOG.info(String.format(java.util.Locale.ROOT,
                     "[ul-panelprobe]   [tour %d] %-28s frame %.2f ms (%.0f FPS) - p95 %.2f ms%s",
                     perfRound + 1, c.label(), mean, 1000.0 / mean, p95, pump));
+        }
+
+        /** Trace ce que Minecraft livre a l'ecran, pour distinguer "SDL ne produit rien" de
+         *  "la page ne recoit pas". */
+        @Override
+        public boolean charTyped(net.minecraft.client.input.CharacterEvent input) {
+            if (typingPhase) {
+                LOG.info("[ul-panelprobe] MC -> ecran : charTyped \"{}\"", input.codepointAsString());
+                if (panel != null) panel.charTyped(input.codepointAsString());
+                return true;
+            }
+            return super.charTyped(input);
+        }
+
+        @Override
+        public boolean keyPressed(net.minecraft.client.input.KeyEvent key) {
+            if (typingPhase) {
+                LOG.info("[ul-panelprobe] MC -> ecran : keyPressed code={} mods={}", key.key(), key.modifiers());
+                if (panel != null) panel.keyPressed(key.key(), key.modifiers());
+                return true;
+            }
+            return super.keyPressed(key);
         }
 
         @Override
