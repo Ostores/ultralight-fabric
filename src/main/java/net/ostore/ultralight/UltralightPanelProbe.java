@@ -9,7 +9,9 @@ import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.blaze3d.platform.cursor.CursorType;
+import com.mojang.blaze3d.platform.cursor.CursorTypes;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -168,7 +170,7 @@ final class UltralightPanelProbe {
         private String inputHtml;
         private final List<String> events = Collections.synchronizedList(new ArrayList<>());
         private final List<String> results = new ArrayList<>();
-        private volatile int cursorShape = -1;
+        private volatile CursorType cursorShape = null;
 
         // -- phase perf --
         private boolean perfPhase = false;
@@ -225,13 +227,13 @@ final class UltralightPanelProbe {
             inputPhase = true;
             events.clear();
             results.clear();
-            cursorShape = -1;
+            cursorShape = null;
             panel = UltralightPanel.builder()
                     .design(1280, 720)
                     .fit(UltralightPanel.Fit.CONTAIN)   // viewport CSS exact et previsible
                     .build();
             panel.setQueryHandler(events::add);
-            panel.setCursorHandler(shape -> cursorShape = shape);
+            panel.setCursorHandler(type -> cursorShape = type);
             if (inputHtml != null) panel.loadHTML(inputHtml);
             panel.focus();
 
@@ -263,13 +265,13 @@ final class UltralightPanelProbe {
                 case 40  -> panel.mouseMoved(logX(640), logY(40));            // zone neutre
                 case 50  -> panel.mouseMoved(logX(200), logY(130));           // sur le bouton
                 case 60  -> check("souris mappee", "move", 200, 130);
-                case 65  -> panel.mouseClicked(logX(200), logY(130), GLFW.GLFW_MOUSE_BUTTON_LEFT);
-                case 68  -> panel.mouseReleased(logX(200), logY(130), GLFW.GLFW_MOUSE_BUTTON_LEFT);
+                case 65  -> panel.mouseClicked(logX(200), logY(130), InputConstants.MOUSE_BUTTON_LEFT);
+                case 68  -> panel.mouseReleased(logX(200), logY(130), InputConstants.MOUSE_BUTTON_LEFT);
                 case 78  -> checkClickTarget("clic sur le bouton", "btn");
                 case 82  -> checkOutside();
                 case 86  -> panel.mouseMoved(logX(250), logY(220));
-                case 90  -> panel.mouseClicked(logX(250), logY(220), GLFW.GLFW_MOUSE_BUTTON_LEFT);
-                case 93  -> panel.mouseReleased(logX(250), logY(220), GLFW.GLFW_MOUSE_BUTTON_LEFT);
+                case 90  -> panel.mouseClicked(logX(250), logY(220), InputConstants.MOUSE_BUTTON_LEFT);
+                case 93  -> panel.mouseReleased(logX(250), logY(220), InputConstants.MOUSE_BUTTON_LEFT);
                 case 100 -> { panel.charTyped("a"); panel.charTyped("b"); panel.charTyped("c"); }
                 case 112 -> checkText();
                 case 118 -> panel.mouseMoved(logX(200), logY(320));           // element cursor:pointer
@@ -393,7 +395,7 @@ final class UltralightPanelProbe {
             else if (panel.drawX() >= 4) { ox = panel.drawX() - 3; oy = logY(130); }
             else                         { ox = panel.drawX() + panel.drawWidth() + 3; oy = logY(130); }
             int before = events.size();
-            boolean handled = panel.mouseClicked(ox, oy, GLFW.GLFW_MOUSE_BUTTON_LEFT);
+            boolean handled = panel.mouseClicked(ox, oy, InputConstants.MOUSE_BUTTON_LEFT);
             if (handled)                     fail("hit-test hors panneau", "le clic a ete consomme");
             else if (panel.contains(ox, oy)) fail("hit-test hors panneau", "point juge dans le panneau");
             else if (events.size() != before) fail("hit-test hors panneau", "la page a recu l'evenement");
@@ -411,11 +413,10 @@ final class UltralightPanelProbe {
         }
 
         private void checkCursor() {
-            if (cursorShape == GLFW.GLFW_HAND_CURSOR) {
-                pass("curseur pointer", "forme GLFW_HAND_CURSOR recue");
+            if (cursorShape == CursorTypes.POINTING_HAND) {
+                pass("curseur pointer", "CursorTypes.POINTING_HAND recu");
             } else {
-                fail("curseur pointer", "forme recue = " + cursorShape
-                        + " (attendu " + GLFW.GLFW_HAND_CURSOR + ")");
+                fail("curseur pointer", "recu " + cursorShape + " (attendu POINTING_HAND)");
             }
         }
 

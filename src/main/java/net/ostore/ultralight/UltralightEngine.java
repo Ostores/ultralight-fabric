@@ -6,7 +6,7 @@ import me.ayydxn.luminescence.platform.impl.StandardULFileSystem;
 import me.ayydxn.luminescence.renderer.ULRenderer;
 import me.ayydxn.luminescence.view.ULView;
 import me.ayydxn.luminescence.view.ULViewConfig;
-import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * écrire dans une texture GPU au milieu de l'extraction corrompt le lot de dessins de Minecraft :
  * son fond de menu se met à échantillonner notre texture (page répétée en damier plein écran) et
  * une vue de la largeur du framebuffer s'affiche en noir plein. Vérifié en jeu, et corrigé en
- * pompant depuis {@link LevelRenderEvents#START_MAIN}, qui est par frame et antérieur à la GUI.
+ * pompant depuis {@link LevelExtractionEvents#END_EXTRACTION}, qui est par frame et antérieur à la GUI.
  */
 public final class UltralightEngine {
 
@@ -80,10 +80,15 @@ public final class UltralightEngine {
         }
         frameDriverRegistered = true;
 
-        // Pompe par frame, dans la phase de rendu du monde et donc AVANT la construction de la GUI.
-        // Surtout pas depuis un élément de HUD ni depuis Screen.extractRenderState : ce sont des
-        // phases d'extraction, et y écrire dans une texture GPU casse le rendu (voir en-tête).
-        LevelRenderEvents.START_MAIN.register(ctx -> onFrame());
+        // Point de pompage : par frame, hors de toute passe de rendu, et avant la GUI.
+        //
+        // MC 26.3 a rendu ce choix nettement plus contraint. LevelRenderEvents.START_MAIN, qui
+        // convenait en 26.2, est branche a l'interieur du frame graph : une passe de rendu y est
+        // ouverte et renderpearl refuse alors toute ecriture de texture
+        // ("Close the existing render pass before performing additional commands").
+        // L'extraction du MONDE, elle, precede le frame graph, donc aucune passe n'est ouverte, et
+        // elle precede aussi la construction de la GUI, ce qui preserve la regle etablie en 26.2.
+        LevelExtractionEvents.END_EXTRACTION.register(ctx -> onFrame());
     }
 
     /** Initialisation native — appelée une seule fois, sur le render thread, au premier frame. */

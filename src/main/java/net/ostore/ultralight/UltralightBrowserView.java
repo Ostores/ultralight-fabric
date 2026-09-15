@@ -20,12 +20,14 @@ import me.ayydxn.luminescence.view.ULCursor;
 import me.ayydxn.luminescence.view.ULView;
 import me.ayydxn.luminescence.view.ULViewListener;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.renderpearl.api.textures.GpuTexture;
 import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.Identifier;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.blaze3d.platform.cursor.CursorType;
+import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import org.lwjgl.system.MemoryUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,7 +108,7 @@ public final class UltralightBrowserView {
     /** Nom du pont pour CETTE vue : deux mods peuvent ainsi cohabiter sans se marcher dessus. */
     private volatile String bridgeName = defaultBridgeName;
     private volatile Consumer<String> queryHandler;
-    private volatile IntConsumer cursorHandler;
+    private volatile Consumer<CursorType> cursorHandler;
 
     // Page lifecycle
     private final AtomicBoolean pageReady = new AtomicBoolean(false);
@@ -202,8 +204,12 @@ public final class UltralightBrowserView {
     public void setQueryHandler(Consumer<String> handler)       { this.queryHandler = handler; }
     public void updateQueryHandler(Consumer<String> handler)    { this.queryHandler = handler; }
     public void setOnPageReadyCallback(Consumer<Void> callback) { this.onPageReadyCallback = callback; }
-    /** Le handler reçoit une forme de curseur GLFW (p.ex. {@code GLFW_HAND_CURSOR}). */
-    public void setCursorHandler(IntConsumer handler)          { this.cursorHandler = handler; }
+    /**
+     * Handler de curseur. Par defaut la vue applique elle-meme le curseur demande par la page
+     * ({@link CursorType#select()}) : il n'y a plus rien a faire cote mod. Poser un handler
+     * remplace ce comportement, par exemple pour ignorer les curseurs d'une page tierce.
+     */
+    public void setCursorHandler(Consumer<CursorType> handler) { this.cursorHandler = handler; }
 
     public Identifier getTextureIdentifier() { return textureReady ? texIdentifier : null; }
     /** Largeur en pixels de la texture courante — à passer en argument de région au blit. */
@@ -217,6 +223,9 @@ public final class UltralightBrowserView {
     public ULView getView() { return view; }
 
     public void close() {
+        // Sans ca, Minecraft resterait persuade qu'une saisie texte est en cours dans une vue
+        // detruite, et le backend SDL avalerait les caracteres suivants.
+        if (textInputActive) { textInputActive = false; notifyTextInput(false); }
         UltralightEngine.unregisterView(this);
         destroyMcTexture();
         textureReady = false;
@@ -226,7 +235,7 @@ public final class UltralightBrowserView {
 
     // =========================================================================
     //  Input — render thread. Coords en pixels CSS de la vue (= device ÷ deviceScale).
-    //  Codes touches/boutons/modifiers : conventions GLFW (= celles de MC).
+    //  Codes touches/boutons/modifiers : ceux de InputConstants (scancodes SDL depuis MC 26.3).
     // =========================================================================
 
     public void mouseMoved(int x, int y) {
@@ -236,16 +245,16 @@ public final class UltralightBrowserView {
         } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
     }
 
-    public void mousePressed(int x, int y, int glfwButton) {
+    public void mousePressed(int x, int y, int mcButton) {
         forcePaint = REPAINT_AFTER_INPUT;
-        try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_DOWN, x, y, mapButton(glfwButton))) {
+        try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_DOWN, x, y, mapButton(mcButton))) {
             view.fireMouseEvent(e);
         } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
     }
 
-    public void mouseReleased(int x, int y, int glfwButton) {
+    public void mouseReleased(int x, int y, int mcButton) {
         forcePaint = REPAINT_AFTER_INPUT;
-        try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_UP, x, y, mapButton(glfwButton))) {
+        try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_UP, x, y, mapButton(mcButton))) {
             view.fireMouseEvent(e);
         } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
     }
@@ -265,14 +274,14 @@ public final class UltralightBrowserView {
         } catch (Throwable t) { LOG.debug("[ul-view:{}] char: {}", viewId, t.getMessage()); }
     }
 
-    public void keyPressed(int glfwKey, int glfwModifiers) {
+    public void keyPressed(int mcKey, int mcModifiers) {
         forcePaint = REPAINT_AFTER_INPUT;
-        fireKey(KeyEventType.RAW_KEY_DOWN, glfwKey, glfwModifiers);
+        fireKey(KeyEventType.RAW_KEY_DOWN, mcKey, mcModifiers);
     }
 
-    public void keyReleased(int glfwKey, int glfwModifiers) {
+    public void keyReleased(int mcKey, int mcModifiers) {
         forcePaint = REPAINT_AFTER_INPUT;
-        fireKey(KeyEventType.KEY_UP, glfwKey, glfwModifiers);
+        fireKey(KeyEventType.KEY_UP, mcKey, mcModifiers);
     }
 
     /**
@@ -287,50 +296,72 @@ public final class UltralightBrowserView {
     public void unfocus() { try { view.unfocus(); } catch (Throwable ignored) {} }
     public boolean hasInputFocus() { try { return view.hasInputFocus(); } catch (Throwable t) { return false; } }
 
-    private void fireKey(KeyEventType type, int glfwKey, int glfwModifiers) {
-        try (ULKeyEvent e = new ULKeyEvent(type, mapModifiers(glfwModifiers),
-                glfwKeyToWindowsVK(glfwKey), 0, "", "", false, false, false)) {
+    private void fireKey(KeyEventType type, int mcKey, int mcModifiers) {
+        try (ULKeyEvent e = new ULKeyEvent(type, mapModifiers(mcModifiers),
+                mcKeyToWindowsVK(mcKey), 0, "", "", false, false, false)) {
             view.fireKeyEvent(e);
         } catch (Throwable t) { LOG.debug("[ul-view:{}] key: {}", viewId, t.getMessage()); }
     }
 
-    private static MouseButton mapButton(int glfwButton) {
-        return switch (glfwButton) {
-            case GLFW.GLFW_MOUSE_BUTTON_RIGHT  -> MouseButton.RIGHT;
-            case GLFW.GLFW_MOUSE_BUTTON_MIDDLE -> MouseButton.MIDDLE;
-            default                            -> MouseButton.LEFT;
+    /**
+     * MC 26.3 est passe de GLFW a SDL : la numerotation des boutons a change (gauche/milieu/droite
+     * valaient 0/1/2 en GLFW, ils valent 1/2/3 en SDL). Ne jamais coder ces valeurs en dur.
+     */
+    private static MouseButton mapButton(int mcButton) {
+        return switch (mcButton) {
+            case InputConstants.MOUSE_BUTTON_RIGHT  -> MouseButton.RIGHT;
+            case InputConstants.MOUSE_BUTTON_MIDDLE -> MouseButton.MIDDLE;
+            default                                 -> MouseButton.LEFT;
         };
     }
 
     /** Modifiers Ultralight : ALT=1, CTRL=1<<1, META=1<<2, SHIFT=1<<3. */
-    private static int mapModifiers(int glfwModifiers) {
+    private static int mapModifiers(int mcModifiers) {
         int m = 0;
-        if ((glfwModifiers & GLFW.GLFW_MOD_ALT)     != 0) m |= 1;
-        if ((glfwModifiers & GLFW.GLFW_MOD_CONTROL) != 0) m |= 1 << 1;
-        if ((glfwModifiers & GLFW.GLFW_MOD_SUPER)   != 0) m |= 1 << 2;
-        if ((glfwModifiers & GLFW.GLFW_MOD_SHIFT)   != 0) m |= 1 << 3;
+        if ((mcModifiers & InputConstants.MOD_ALT)     != 0) m |= 1;
+        if ((mcModifiers & InputConstants.MOD_CONTROL) != 0) m |= 1 << 1;
+        if ((mcModifiers & InputConstants.MOD_SUPER)   != 0) m |= 1 << 2;
+        if ((mcModifiers & InputConstants.MOD_SHIFT)   != 0) m |= 1 << 3;
         return m;
     }
 
-    /** GLFW → virtual key code Windows (A-Z/0-9 coïncident ; touches d'édition remappées). */
-    private static int glfwKeyToWindowsVK(int glfwKey) {
-        return switch (glfwKey) {
-            case GLFW.GLFW_KEY_BACKSPACE -> 0x08;
-            case GLFW.GLFW_KEY_TAB       -> 0x09;
-            case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> 0x0D;
-            case GLFW.GLFW_KEY_ESCAPE    -> 0x1B;
-            case GLFW.GLFW_KEY_SPACE     -> 0x20;
-            case GLFW.GLFW_KEY_PAGE_UP   -> 0x21;
-            case GLFW.GLFW_KEY_PAGE_DOWN -> 0x22;
-            case GLFW.GLFW_KEY_END       -> 0x23;
-            case GLFW.GLFW_KEY_HOME      -> 0x24;
-            case GLFW.GLFW_KEY_LEFT      -> 0x25;
-            case GLFW.GLFW_KEY_UP        -> 0x26;
-            case GLFW.GLFW_KEY_RIGHT     -> 0x27;
-            case GLFW.GLFW_KEY_DOWN      -> 0x28;
-            case GLFW.GLFW_KEY_INSERT    -> 0x2D;
-            case GLFW.GLFW_KEY_DELETE    -> 0x2E;
-            default                      -> glfwKey; // A-Z, 0-9 alignés sur les VK
+    /**
+     * Code de touche Minecraft (scancode SDL depuis la 26.3) vers virtual key code Windows,
+     * ce qu'attend Ultralight.
+     *
+     * <p>En GLFW les codes de A-Z et 0-9 coincidaient avec l'ASCII, donc avec les VK : un simple
+     * passe-plat suffisait. Les scancodes SDL ne coincident avec rien (A vaut 4, espace 44), il
+     * faut donc une vraie table. Une touche inconnue renvoie 0 : Ultralight l'ignore, ce qui vaut
+     * mieux que d'envoyer un VK arbitraire.
+     */
+    private static int mcKeyToWindowsVK(int mcKey) {
+        // Lettres et chiffres : plages contigues cote SDL, on translate.
+        if (mcKey >= InputConstants.KEY_A && mcKey <= InputConstants.KEY_Z) {
+            return 0x41 + (mcKey - InputConstants.KEY_A);          // 'A'..'Z'
+        }
+        if (mcKey >= InputConstants.KEY_1 && mcKey <= InputConstants.KEY_9) {
+            return 0x31 + (mcKey - InputConstants.KEY_1);          // '1'..'9'
+        }
+        if (mcKey == InputConstants.KEY_0) return 0x30;            // le 0 suit le 9 cote SDL
+
+        return switch (mcKey) {
+            case InputConstants.KEY_BACKSPACE   -> 0x08;
+            case InputConstants.KEY_TAB         -> 0x09;
+            case InputConstants.KEY_RETURN,
+                 InputConstants.KEY_NUMPADENTER -> 0x0D;
+            case InputConstants.KEY_ESCAPE      -> 0x1B;
+            case InputConstants.KEY_SPACE       -> 0x20;
+            case InputConstants.KEY_PAGEUP      -> 0x21;
+            case InputConstants.KEY_PAGEDOWN    -> 0x22;
+            case InputConstants.KEY_END         -> 0x23;
+            case InputConstants.KEY_HOME        -> 0x24;
+            case InputConstants.KEY_LEFT        -> 0x25;
+            case InputConstants.KEY_UP          -> 0x26;
+            case InputConstants.KEY_RIGHT       -> 0x27;
+            case InputConstants.KEY_DOWN        -> 0x28;
+            case InputConstants.KEY_INSERT      -> 0x2D;
+            case InputConstants.KEY_DELETE      -> 0x2E;
+            default                             -> 0;
         };
     }
 
@@ -349,7 +380,35 @@ public final class UltralightBrowserView {
         }
     }
 
-    void onRendererTick() { paintSurface(); drainBridge(); }
+    void onRendererTick() { paintSurface(); drainBridge(); syncTextInputFocus(); }
+
+    /** Focus texte deja signale a Minecraft. */
+    private boolean textInputActive = false;
+
+    /**
+     * Previent Minecraft quand un champ editable de la PAGE prend ou perd le focus.
+     *
+     * <p>Obligatoire depuis MC 26.3 : le backend SDL doit savoir qu'une saisie texte est en cours,
+     * sinon il se desynchronise et la saisie de caracteres cesse completement de fonctionner. Notre
+     * page joue exactement le role d'un widget de saisie personnalise, sauf que le focus vit cote
+     * WebKit : on le sonde donc a chaque frame et on ne signale que les changements.
+     */
+    private void syncTextInputFocus() {
+        boolean focused;
+        try { focused = view.hasInputFocus(); } catch (Throwable t) { return; }
+        if (focused == textInputActive) return;
+        textInputActive = focused;
+        notifyTextInput(focused);
+    }
+
+    private void notifyTextInput(boolean focused) {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc != null) mc.textInputManager().onTextInputFocusChange(this, focused);
+        } catch (Throwable t) {
+            LOG.debug("[ul-view:{}] TextInputManager: {}", viewId, t.getMessage());
+        }
+    }
 
     // =========================================================================
     //  Pipeline surface → NativeImageBackedTexture (mémoire native directe)
@@ -651,8 +710,10 @@ public final class UltralightBrowserView {
 
         @Override
         public void onCursorChange(ULCursor cursor) {
-            IntConsumer h = cursorHandler;
-            if (h != null) h.accept(glfwCursorShape(cursor));
+            CursorType type = cursorType(cursor);
+            Consumer<CursorType> h = cursorHandler;
+            if (h != null) h.accept(type);
+            else           type.select();   // MC 26.3 : plus besoin de passer par GLFW
         }
 
         @Override
@@ -667,14 +728,17 @@ public final class UltralightBrowserView {
         }
     }
 
-    private static int glfwCursorShape(ULCursor c) {
+    /** Curseur Ultralight vers le jeu vanilla de MC 26.3 (SDL). */
+    private static CursorType cursorType(ULCursor c) {
         return switch (c) {
-            case HAND                 -> GLFW.GLFW_HAND_CURSOR;
-            case IBEAM                -> GLFW.GLFW_IBEAM_CURSOR;
-            case CROSS                -> GLFW.GLFW_CROSSHAIR_CURSOR;
-            case EAST_WEST_RESIZE, EAST_RESIZE, WEST_RESIZE, COLUMN_RESIZE -> GLFW.GLFW_HRESIZE_CURSOR;
-            case NORTH_SOUTH_RESIZE, NORTH_RESIZE, SOUTH_RESIZE, ROW_RESIZE -> GLFW.GLFW_VRESIZE_CURSOR;
-            default                   -> GLFW.GLFW_ARROW_CURSOR; // POINTER inclus
+            case HAND                 -> CursorTypes.POINTING_HAND;
+            case IBEAM                -> CursorTypes.IBEAM;
+            case CROSS                -> CursorTypes.CROSSHAIR;
+            case EAST_WEST_RESIZE, EAST_RESIZE, WEST_RESIZE, COLUMN_RESIZE -> CursorTypes.RESIZE_EW;
+            case NORTH_SOUTH_RESIZE, NORTH_RESIZE, SOUTH_RESIZE, ROW_RESIZE -> CursorTypes.RESIZE_NS;
+            case MOVE                 -> CursorTypes.RESIZE_ALL;
+            case NO_DROP, NOT_ALLOWED -> CursorTypes.NOT_ALLOWED;
+            default                   -> CursorTypes.ARROW;   // POINTER inclus
         };
     }
 }

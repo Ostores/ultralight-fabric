@@ -2,6 +2,7 @@ package net.ostore.ultralight;
 
 import com.mojang.blaze3d.platform.Window;
 import net.minecraft.client.Minecraft;
+import com.mojang.blaze3d.platform.cursor.CursorType;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
@@ -9,7 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.function.Consumer;
-import java.util.function.IntConsumer;
+
 
 /**
  * Panneau web : une {@link UltralightBrowserView} dont le wrapper possède la <b>géométrie</b>.
@@ -102,7 +103,7 @@ public final class UltralightPanel implements AutoCloseable {
 
     // ── handlers différés (posés avant que la vue existe) ──
     private Consumer<String> queryHandler;
-    private IntConsumer cursorHandler;
+    private Consumer<CursorType> cursorHandler;
     private Consumer<Void> pageReadyCallback;
     private String pendingHtml, pendingUrl;
 
@@ -205,7 +206,12 @@ public final class UltralightPanel implements AutoCloseable {
         if (view != null) view.setQueryHandler(handler);
     }
 
-    public void setCursorHandler(IntConsumer handler) {
+    /**
+     * Remplace le comportement par defaut, qui est d'appliquer directement le curseur demande par
+     * la page. Depuis MC 26.3 le jeu expose ses propres curseurs, il n'y a donc plus rien a cabler
+     * cote mod : ne poser un handler que pour ignorer ou filtrer ces demandes.
+     */
+    public void setCursorHandler(Consumer<CursorType> handler) {
         this.cursorHandler = handler;
         if (view != null) view.setCursorHandler(handler);
     }
