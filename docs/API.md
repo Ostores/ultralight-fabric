@@ -1,6 +1,6 @@
 # Ultralight API — guide d'intégration
 
-Mod-API Fabric (client, MC 26.2) qui rend du HTML/CSS/JS dans une texture Minecraft
+Mod-API Fabric (client, MC 26.3) qui rend du HTML/CSS/JS dans une texture Minecraft
 via **Ultralight 1.4 (WebKit 615, ≈ Safari 16.4)** (binding Luminescence). Conçu pour être
 consommé par un autre mod via `mavenLocal()`.
 
@@ -15,7 +15,7 @@ consommé par un autre mod via `mavenLocal()`.
 
 | Méthode | Rôle |
 |---|---|
-| `static void init()` | À appeler dans `onInitializeClient`. Enregistre le pilote de frame (`LevelRenderEvents.START_MAIN`, par frame et **avant** la GUI) ; l'init native (plateforme + renderer) est **différée au 1er frame** (fenêtre/GL prêtes). |
+| `static void init()` | À appeler dans `onInitializeClient`. Enregistre le pilote de frame (`LevelExtractionEvents.END_EXTRACTION`, par frame, hors passe de rendu et **avant** la GUI) ; l'init native (plateforme + renderer) est **différée au 1er frame** (fenêtre/GL prêtes). |
 | `static boolean isReady()` | Le moteur est-il prêt. |
 | `static void renderFrame()` | **Pompe un cycle** update/render/paint des vues actives. Normalement **inutile** : le moteur se pompe seul à chaque frame. Ne jamais l'appeler depuis une phase d'extraction de la GUI (voir l'encadré ci-dessous). |
 
@@ -32,9 +32,15 @@ En jeu, les vues se mettent à jour seules, écran ouvert ou non.
 > - une vue dont la largeur égale celle du framebuffer s'affiche en **noir plein**.
 >
 > Les textures produites sont pourtant correctes (vérifié en les vidant sur disque) : le défaut est
-> uniquement dans le *moment* de l'écriture. Le moteur pompe donc depuis
-> `LevelRenderEvents.START_MAIN`. Dans `extractRenderState` et dans un `HudElement`, on ne fait
-> que **dessiner**.
+> uniquement dans le *moment* de l'écriture. Dans `extractRenderState` et dans un `HudElement`, on
+> ne fait donc que **dessiner**.
+>
+> **MC 26.3 ajoute une seconde contrainte, opposée.** L'abstraction GPU est passée à
+> `com.mojang.renderpearl`, avec des passes de rendu explicites : écrire une texture alors qu'une
+> passe est ouverte lève `Close the existing render pass before performing additional commands`.
+> Or `LevelRenderEvents.START_MAIN`, qui convenait en 26.2, est branché à l'intérieur du frame
+> graph. Le moteur pompe donc depuis `LevelExtractionEvents.END_EXTRACTION` : l'extraction du
+> monde précède le frame graph (aucune passe ouverte) **et** la construction de la GUI.
 
 ---
 
@@ -89,25 +95,27 @@ view.setOnPageReadyCallback(v -> { /* DOM prêt (onDOMReady), marshalé sur le t
 boolean ready = view.isPageReady();
 ```
 
-### Input (codes GLFW = ceux de MC)
+### Input (codes `InputConstants`, ceux de MC)
 | Méthode | Notes |
 |---|---|
 | `mouseMoved(int x, int y)` | Coords en **pixels CSS** de la vue (voir le piège §4). |
-| `mousePressed(int x, int y, int glfwButton)` | `glfwButton` : `GLFW_MOUSE_BUTTON_LEFT/RIGHT/MIDDLE`. |
+| `mousePressed(int x, int y, int mcButton)` | `InputConstants.MOUSE_BUTTON_LEFT/RIGHT/MIDDLE`. |
 | `mouseReleased(int x, int y, int glfwButton)` | |
 | `scroll(int deltaXpx, int deltaYpx)` | Défilement en pixels. |
 | `charTyped(String text)` | Saisie de texte (événement CHAR). |
-| `keyPressed(int glfwKey, int glfwMods)` | Touches d'édition/navigation/raccourcis (mapping GLFW→VK interne). |
-| `keyReleased(int glfwKey, int glfwMods)` | |
+| `keyPressed(int mcKey, int mcMods)` | Codes `InputConstants` (scancodes SDL depuis 26.3 ; mapping interne vers les VK attendus par Ultralight). |
+| `keyReleased(int mcKey, int mcMods)` | |
 | `focus()` / `unfocus()` | Donne/retire le focus clavier à la vue. |
 | `boolean hasInputFocus()` | `true` si un élément éditable (`<input>`…) a le focus. |
 
 ### Curseurs
 ```java
-view.setCursorHandler(glfwShape -> GLFW.glfwSetCursor(windowHandle, standardCursor(glfwShape)));
+view.setCursorHandler(type -> { /* optionnel : filtrer, sinon la vue applique seule */ });
 ```
-Le handler reçoit une **forme de curseur GLFW** (`GLFW_HAND_CURSOR`, `GLFW_IBEAM_CURSOR`,
-`GLFW_ARROW_CURSOR`, redimensionnement…). Remets `glfwSetCursor(handle, 0L)` à la fermeture.
+Depuis MC 26.3, **il n'y a plus rien à câbler** : la vue applique elle-même le curseur demandé par
+la page, via le jeu de curseurs vanilla (`CursorTypes.POINTING_HAND`, `IBEAM`, `CROSSHAIR`,
+`RESIZE_NS`/`EW`/`ALL`, `NOT_ALLOWED`, `ARROW`). Poser un handler ne sert plus qu'à filtrer ou
+ignorer ces demandes ; il reçoit un `CursorType`.
 
 ---
 

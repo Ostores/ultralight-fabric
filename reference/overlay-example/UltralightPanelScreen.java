@@ -5,15 +5,13 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * EXEMPLE RECOMMANDÉ (non compilé) — le même overlay que {@link UltralightDemoScreen}, mais écrit
@@ -21,8 +19,8 @@ import java.util.Map;
  *
  * <p>Comparé à la version manuelle, tout ce qui suit disparaît du code du mod : le calcul de la
  * taille de vue et du {@code deviceScale}, le suivi du framebuffer au redimensionnement, le
- * rectangle de dessin, les arguments de région du {@code blit}, et surtout la conversion
- * « coordonnées logiques Minecraft → pixels CSS » qui est le piège classique.
+ * rectangle de dessin, les arguments de région du {@code blit}, la gestion des curseurs, et
+ * surtout la conversion « coordonnées logiques Minecraft → pixels CSS » qui est le piège classique.
  *
  * <p>Le seul choix à faire est la {@link UltralightPanel.Fit politique de mise en page} :
  * {@code FILL_CLAMPED} (défaut) convient à presque tout ; {@code CONTAIN} si l'interface a un
@@ -33,7 +31,6 @@ public final class UltralightPanelScreen extends Screen {
     private static final Logger LOG = LoggerFactory.getLogger("ultralight/panelscreen");
 
     private UltralightPanel panel;
-    private final Map<Integer, Long> cursorCache = new HashMap<>();
 
     public UltralightPanelScreen() { super(Component.literal("Ultralight Panel")); }
 
@@ -46,7 +43,6 @@ public final class UltralightPanelScreen extends Screen {
                 .fit(UltralightPanel.Fit.FILL_CLAMPED)
                 .build();
         panel.setQueryHandler(msg -> LOG.info("[ul-panelscreen] pont JS→Java : {}", msg));
-        panel.setCursorHandler(this::applyCursor);
         String html = read("/assets/ultralight/demo-ui.html");
         if (html != null) panel.loadHTML(html);
         panel.focus();
@@ -82,7 +78,7 @@ public final class UltralightPanelScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent key) {
-        if (key.key() == GLFW.GLFW_KEY_ESCAPE) { onClose(); return true; }
+        if (key.key() == InputConstants.KEY_ESCAPE) { onClose(); return true; }
         return panel != null && panel.keyPressed(key.key(), key.modifiers());
     }
 
@@ -99,16 +95,12 @@ public final class UltralightPanelScreen extends Screen {
     @Override
     public void removed() {
         if (panel != null) { panel.close(); panel = null; }
-        if (minecraft != null) GLFW.glfwSetCursor(minecraft.getWindow().handle(), 0L);
+        // Rien a faire pour le curseur : depuis MC 26.3 la vue applique elle-meme celui que la
+        // page demande, et Minecraft le remet a l'etat voulu tout seul.
     }
 
     @Override public boolean isPauseScreen() { return false; }
 
-    private void applyCursor(int glfwShape) {
-        if (minecraft == null) return;
-        long cur = cursorCache.computeIfAbsent(glfwShape, GLFW::glfwCreateStandardCursor);
-        GLFW.glfwSetCursor(minecraft.getWindow().handle(), cur);
-    }
 
     private static String read(String resource) {
         try (InputStream in = UltralightPanelScreen.class.getResourceAsStream(resource)) {

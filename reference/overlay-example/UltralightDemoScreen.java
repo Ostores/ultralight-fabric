@@ -8,15 +8,13 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.resources.Identifier;
-import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * DÉMO INTERACTIVE DE RÉFÉRENCE (non compilée) — overlay web plein écran, net, indépendant du
@@ -30,6 +28,8 @@ import java.util.Map;
  *   <li>Dessin via la surcharge « région » de {@code blit} : texture physique échantillonnée en
  *       entier, dessinée sur la taille logique de l'écran → 1 texel = 1 px physique (net).</li>
  *   <li>Souris mappée logique → <b>pixels CSS</b> (device ÷ deviceScale), le piège classique.</li>
+ *   <li>Codes touches et boutons : ceux de {@code InputConstants} (scancodes SDL depuis 26.3),
+ *       jamais de valeurs codées en dur.</li>
  * </ul>
  *
  * <p><b>MC 26.x :</b> les écrans ne dessinent plus dans {@code render(DrawContext…)} mais
@@ -47,7 +47,6 @@ public final class UltralightDemoScreen extends Screen {
     private UltralightBrowserView view;
     private int fbW, fbH;            // pixels physiques (taille de la vue/texture)
     private double deviceScale = 1.0;
-    private final Map<Integer, Long> cursorCache = new HashMap<>();
 
     public UltralightDemoScreen() { super(Component.literal("Ultralight Demo")); }
 
@@ -62,7 +61,6 @@ public final class UltralightDemoScreen extends Screen {
         if (view == null) {
             view = new UltralightBrowserView(fbW, fbH, deviceScale);
             view.setQueryHandler(msg -> LOG.info("[ul-demoscreen] pont JS→Java : {}", msg));
-            view.setCursorHandler(this::applyCursor);
             String html = read("/assets/ultralight/demo-ui.html");
             if (html != null) view.loadHTML(html);
             view.focus();
@@ -117,7 +115,7 @@ public final class UltralightDemoScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent key) {
-        if (key.key() == GLFW.GLFW_KEY_ESCAPE) { onClose(); return true; }
+        if (key.key() == InputConstants.KEY_ESCAPE) { onClose(); return true; }
         if (view != null) view.keyPressed(key.key(), key.modifiers());
         return true;
     }
@@ -137,16 +135,12 @@ public final class UltralightDemoScreen extends Screen {
     @Override
     public void removed() {
         if (view != null) { view.close(); view = null; }
-        if (minecraft != null) GLFW.glfwSetCursor(minecraft.getWindow().handle(), 0L); // curseur par défaut
+        // Depuis MC 26.3, la vue applique elle-meme le curseur demande par la page : plus rien a
+        // remettre en etat ici.
     }
 
     @Override public boolean isPauseScreen() { return false; }
 
-    private void applyCursor(int glfwShape) {
-        if (minecraft == null) return;
-        long cur = cursorCache.computeIfAbsent(glfwShape, GLFW::glfwCreateStandardCursor);
-        GLFW.glfwSetCursor(minecraft.getWindow().handle(), cur);
-    }
 
     private static String read(String resource) {
         try (InputStream in = UltralightDemoScreen.class.getResourceAsStream(resource)) {

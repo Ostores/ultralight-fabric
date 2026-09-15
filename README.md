@@ -1,6 +1,6 @@
 # ultralight-fabric
 
-Mod-API **Fabric** (client, Minecraft **26.2**) qui rend du **HTML / CSS / JS** dans une texture
+Mod-API **Fabric** (client, Minecraft **26.3**) qui rend du **HTML / CSS / JS** dans une texture
 Minecraft via **[Ultralight](https://ultralig.ht) 1.4 (WebKit 615 ≈ Safari 16.4)**, exposé pour
 être consommé par d'autres mods.
 
