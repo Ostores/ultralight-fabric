@@ -35,9 +35,10 @@ si la version change).
 - Base de téléchargement surchargeable : `-Dultralight.natives.url=<url/>`.
 - Dev hors-ligne : place les natifs dans `<gameDir>/ultralight-1.4/bin` → le téléchargement est ignoré.
 - Désactivation manuelle du rendu HTML : `-Dultralight.disable=true` (ou `ULTRALIGHT_DISABLE=true`).
-- **CPU sans AVX** (Intel pré-2011 / AMD pré-Bulldozer) : les natifs WebKit 615 sont compilés avec
-  AVX → le rendu HTML se **désactive automatiquement** sur ces machines (au lieu de crasher).
-  Bypass de test : `-Dultralight.skipCpuCheck=true` (⚠️ re-crashe sur un vrai CPU sans AVX).
+- **CPU sans AVX2** (Intel Ivy Bridge et antérieurs, AMD antérieurs à Excavator) : les natifs
+  WebKit 615 utilisent des instructions AVX2 → le rendu HTML se **désactive automatiquement** sur
+  ces machines (au lieu de crasher). Bypass de test : `-Dultralight.skipCpuCheck=true`
+  (⚠️ re-crashe sur un vrai CPU sans AVX2).
 
 ## Build (développeurs)
 
@@ -49,7 +50,7 @@ Prérequis : **JDK 25** (MC 26.x compile en release 25). Le wrapper Gradle (9.7)
 # 2. Installe-la dans le Maven local (requise pour le jar-in-jar) :
 scripts/install-luminescence.ps1     # Windows   (ou: bash scripts/install-luminescence.sh)
 # 3. Build :
-./gradlew build                      # → build/libs/ultralight-1.0.jar (~15 Mo, autonome)
+./gradlew build                      # → build/libs/ultralight-<version>.jar (~15 Mo, autonome)
 ```
 
 Le jar embarque l'API Luminescence (LGPL) + icu4j en **jar-in-jar**. Les natifs ne sont **pas**
@@ -86,6 +87,11 @@ sur la release `natives-1.4.0`.
 
 ## API (mods consommateurs)
 
+> **Dépendance, versions, et les pièges à connaître avant d'écrire la moindre ligne** (entrée SDL
+> depuis 26.3, ne jamais pomper le moteur soi-même) : section
+> **[Consommer depuis un autre mod](docs/API.md#consommer-depuis-un-autre-mod)** de `docs/API.md`.
+> Coordonnées : `net.ostore:ultralight:3.0.0` via `mavenLocal()`, en `implementation`.
+
 `UltralightEngine.init()` dans `onInitializeClient`, puis **`UltralightPanel`** : il possède la
 géométrie (taille de vue, `deviceScale`, rectangle de dessin, conversion des coordonnées souris)
 et suit la fenêtre tout seul.
@@ -96,7 +102,7 @@ panel = UltralightPanel.builder()
         .fit(UltralightPanel.Fit.FILL_CLAMPED)    // défaut
         .build();
 panel.loadHTML(html);
-// Screen.extractRenderState : panel.renderInScreen(graphics);
+// Screen.extractRenderState : panel.render(graphics);   // dessin seulement, le moteur tourne seul
 ```
 
 Trois politiques de mise en page, pour que les interfaces ne cassent plus selon le **ratio

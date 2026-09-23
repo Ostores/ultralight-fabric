@@ -2,7 +2,78 @@
 
 Mod-API Fabric (client, MC 26.3) qui rend du HTML/CSS/JS dans une texture Minecraft
 via **Ultralight 1.4 (WebKit 615, ≈ Safari 16.4)** (binding Luminescence). Conçu pour être
-consommé par un autre mod via `mavenLocal()`.
+consommé par un autre mod.
+
+## Consommer depuis un autre mod
+
+### Versions
+
+| Version du mod | Minecraft | Branche | État |
+|---|---|---|---|
+| **3.0.0** | **26.3** | `26.3` | maintenue |
+| 2.0.0 | 26.2 | `26.2` | gelée |
+| 1.x | 1.21.11 | `main` | gelée |
+
+Une version ne tourne que sur **son** Minecraft : `fabric.mod.json` déclare `~26.3`, le jeu
+refuse de démarrer sur une autre version.
+
+### Dépendance Gradle
+
+L'artefact n'est pas sur un dépôt public : il se publie dans le Maven local depuis ce dépôt.
+
+```bash
+./gradlew publishToMavenLocal      # côté ultralight, branche 26.3
+```
+
+```gradle
+repositories {
+    mavenLocal()
+    // + les dépôts habituels (maven.fabricmc.net, mavenCentral)
+}
+dependencies {
+    implementation "net.ostore:ultralight:3.0.0"
+}
+```
+
+- **`implementation`, pas `modImplementation`** : MC 26.x n'est plus obfusqué, il n'y a plus de
+  remap.
+- Luminescence (`io.github.ayydxn:luminescence`) n'est publiée sur aucun dépôt public. Elle est
+  résolue depuis le Maven local, où `scripts/install-luminescence.ps1` l'installe. Sur une autre
+  machine, lancer ce script une fois avant de compiler le mod consommateur.
+- Un `-SNAPSHOT` est mis en cache par Gradle : après une republication, `--refresh-dependencies`.
+
+Et dans le `fabric.mod.json` du mod consommateur :
+
+```json
+"depends": { "ultralight": ">=3.0.0" }
+```
+
+### À lire avant d'écrire la moindre ligne
+
+1. **Utiliser `UltralightPanel`** (§3), pas `UltralightBrowserView` à la main. C'est lui qui
+   empêche une interface de casser selon le ratio d'écran.
+2. **Ne jamais pomper le moteur soi-même.** Il tourne seul à chaque frame. Dans
+   `extractRenderState` ou un `HudElement`, on ne fait que `panel.render(graphics)` (voir §1).
+3. **Ne jamais coder en dur des codes de touche ou de bouton** : voir l'encadré ci-dessous.
+4. **Fermer ce qu'on ouvre** : `panel.close()` dans `Screen.removed()`.
+
+> ### ⚠️ MC 26.3 : l'entrée passe par SDL, plus par GLFW
+>
+> Les **boutons de souris sont renumérotés** : gauche/milieu/droite valaient 0/1/2 en GLFW, ils
+> valent **1/2/3** en SDL. Les **touches sont des scancodes SDL** (A = 4, 1 = 30, Entrée = 40,
+> Échap = 41, Espace = 44), là où GLFW suivait l'ASCII (A = 65).
+>
+> Le piège : `mouseClicked`, `keyPressed` et consorts ont **gardé la même signature** avec une
+> **sémantique différente**. Du code écrit pour GLFW compile sans erreur, sans avertissement, et
+> se comporte mal : un test `button == 0` n'est jamais vrai pour un clic gauche, et une touche
+> testée contre `65` (le A de GLFW) réagit en fait à F8.
+>
+> La règle : transmettre **tels quels** les codes reçus par le `Screen`
+> (`click.button()`, `key.key()`, `key.modifiers()`), et ne les comparer qu'aux constantes de
+> `com.mojang.blaze3d.platform.InputConstants` (`MOUSE_BUTTON_LEFT`, `KEY_ESCAPE`, `KEY_A`…).
+> La bibliothèque convertit elle-même vers les codes attendus par Ultralight.
+
+---
 
 > **Contrainte absolue : tout doit s'exécuter sur le render thread du client.**
 > Le binding JNI met en cache le `JNIEnv` du thread d'init ; un appel depuis un
@@ -17,7 +88,7 @@ consommé par un autre mod via `mavenLocal()`.
 |---|---|
 | `static void init()` | À appeler dans `onInitializeClient`. Enregistre le pilote de frame (`LevelExtractionEvents.END_EXTRACTION`, par frame, hors passe de rendu et **avant** la GUI) ; l'init native (plateforme + renderer) est **différée au 1er frame** (fenêtre/GL prêtes). |
 | `static boolean isReady()` | Le moteur est-il prêt. |
-| `static void renderFrame()` | **Pompe un cycle** update/render/paint des vues actives. Normalement **inutile** : le moteur se pompe seul à chaque frame. Ne jamais l'appeler depuis une phase d'extraction de la GUI (voir l'encadré ci-dessous). |
+| `static void renderFrame()` | **Pompe un cycle** update/render/paint des vues actives. Normalement **inutile** : le moteur se pompe seul à chaque frame en jeu. Seul usage légitime : faire vivre une vue hors monde, depuis un tick client. Depuis la 3.0.0, l'appel est **ignoré** pendant l'extraction de la GUI (avec un avertissement et la pile de l'appelant) et en jeu (le moteur est déjà pompé). |
 
 En jeu, les vues se mettent à jour seules, écran ouvert ou non.
 
@@ -87,7 +158,14 @@ Côté Java :
 view.setQueryHandler(msg -> { /* msg = la string passée à ulQuery, sur le render thread */ });
 view.updateQueryHandler(handler);              // remplace le handler sans recréer la vue
 ```
-Pas de polling, pas de latence (callback natif JavaScriptCore).
+Le handler est appelé sur le render thread, au plus tard à la frame suivant l'appel de la page.
+
+Sous le capot, Luminescence 1.4 ne remonte pas les appels de fonction natifs initiés par la page :
+`ulQuery` empile donc les messages dans une file JS que la bibliothèque vide. Depuis la 3.0.0,
+elle ne la vide que quand la page signale un message (auparavant : à chaque frame et pour chaque
+vue, soit ~90 µs par frame et par vue même sans aucun message). Un vidage de secours tourne toutes
+les 30 frames ; s'il rattrape un message, c'est que le signal ne passe plus, et un avertissement le
+dit.
 
 ### Cycle de page
 ```java
@@ -99,8 +177,8 @@ boolean ready = view.isPageReady();
 | Méthode | Notes |
 |---|---|
 | `mouseMoved(int x, int y)` | Coords en **pixels CSS** de la vue (voir le piège §4). |
-| `mousePressed(int x, int y, int mcButton)` | `InputConstants.MOUSE_BUTTON_LEFT/RIGHT/MIDDLE`. |
-| `mouseReleased(int x, int y, int glfwButton)` | |
+| `mousePressed(int x, int y, int mcButton)` | `InputConstants.MOUSE_BUTTON_LEFT/RIGHT/MIDDLE` (codes SDL depuis 26.3, voir l'encadré en tête). |
+| `mouseReleased(int x, int y, int mcButton)` | |
 | `scroll(int deltaXpx, int deltaYpx)` | Défilement en pixels. |
 | `charTyped(String text)` | Saisie de texte (événement CHAR). |
 | `keyPressed(int mcKey, int mcMods)` | Codes `InputConstants` (scancodes SDL depuis 26.3 ; mapping interne vers les VK attendus par Ultralight). |
@@ -186,7 +264,7 @@ panel.setPreviewAspect(21.0 / 9.0);   // simule un 21:9 dans la fenêtre actuell
 |---|---|
 | `render(graphics)` | depuis `Screen.extractRenderState` **ou** un `HudElement` : géométrie + dessin. Ne pompe pas le moteur. |
 | `mouseMoved/mouseClicked/mouseReleased/mouseScrolled(...)` | coordonnées **logiques MC** ; renvoie `false` hors du panneau |
-| `keyPressed/keyReleased(glfwKey, mods)`, `charTyped(text)` | identiques à la vue |
+| `keyPressed/keyReleased(mcKey, mcMods)`, `charTyped(text)` | identiques à la vue ; codes tels que reçus par le `Screen` |
 | `focus()` / `unfocus()` / `hasInputFocus()` | focus clavier |
 | `contains(x, y)`, `drawX/drawY/drawWidth/drawHeight()` | rectangle occupé, en px logiques |
 | `cssWidth()` / `cssHeight()` | viewport CSS courant |
@@ -194,7 +272,7 @@ panel.setPreviewAspect(21.0 / 9.0);   // simule un 21:9 dans la fenêtre actuell
 | `maxViewPixels(n)` *(builder)* | plafond de résolution (défaut 3840×2160) |
 | `bridgeName(nom)` *(builder)* | nom de la fonction de pont, propre à ce panneau |
 | `view()` | la `UltralightBrowserView` sous-jacente |
-| `close()` | libère tout |
+| `close()` | libère tout. Au-delà de 8 vues ouvertes en même temps, la bibliothèque avertit (≈16 Mo chacune en 1080p) : c'est presque toujours une vue jamais fermée. |
 
 ---
 
@@ -238,10 +316,11 @@ Perf : en CPU mode, éviter les animations plein écran continues + `backdrop-fi
 - **Désactivation manuelle** : `-Dultralight.disable=true` (ou `ULTRALIGHT_DISABLE=true`) coupe
   totalement le rendu HTML — aucun natif n'est téléchargé ni chargé. `UltralightEngine.isReady()`
   reste `false` ; les mods consommateurs doivent le vérifier avant d'ouvrir une vue.
-- **Garde-fou AVX** : les natifs WebKit 615 sont compilés avec AVX. Sur un CPU sans AVX (Intel
-  pré-2011 / AMD pré-Bulldozer), la 1re instruction AVX lèverait un `SIGILL` natif = crash JVM dur.
-  Le moteur détecte l'absence d'AVX (flag HotSpot `UseAVX`) et **désactive le rendu HTML** au lieu
-  de crasher. Forçage (tests) : `-Dultralight.skipCpuCheck=true`.
+- **Garde-fou AVX2** : les natifs WebKit 615 utilisent des instructions **AVX2**. Sur un CPU sans
+  AVX2 (Intel Ivy Bridge et antérieurs, AMD antérieurs à Excavator), la première lèverait un
+  `SIGILL` natif, donc un crash JVM impossible à rattraper. Le moteur lit le flag HotSpot `UseAVX`
+  (≥ 2 requis) et **désactive le rendu HTML** au lieu de crasher. Forçage (tests) :
+  `-Dultralight.skipCpuCheck=true`.
 
 ---
 
