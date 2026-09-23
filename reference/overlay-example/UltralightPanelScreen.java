@@ -79,12 +79,12 @@ public final class UltralightPanelScreen extends Screen {
     @Override
     public boolean keyPressed(KeyEvent key) {
         if (key.key() == InputConstants.KEY_ESCAPE) { onClose(); return true; }
-        return panel != null && panel.keyPressed(key.key(), key.modifiers());
+        return panel != null && panel.keyPressed(key);   // l'événement complet : disposition du clavier respectée
     }
 
     @Override
     public boolean keyReleased(KeyEvent key) {
-        return panel != null && panel.keyReleased(key.key(), key.modifiers());
+        return panel != null && panel.keyReleased(key);
     }
 
     @Override

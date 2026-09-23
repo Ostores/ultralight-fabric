@@ -90,7 +90,7 @@ sur la release `natives-1.4.0`.
 > **Dépendance, versions, et les pièges à connaître avant d'écrire la moindre ligne** (entrée SDL
 > depuis 26.3, ne jamais pomper le moteur soi-même) : section
 > **[Consommer depuis un autre mod](docs/API.md#consommer-depuis-un-autre-mod)** de `docs/API.md`.
-> Coordonnées : `net.ostore:ultralight:3.0.0` via `mavenLocal()`, en `implementation`.
+> Coordonnées : `net.ostore:ultralight:3.1.0` via `mavenLocal()`, en `implementation`.
 
 `UltralightEngine.init()` dans `onInitializeClient`, puis **`UltralightPanel`** : il possède la
 géométrie (taille de vue, `deviceScale`, rectangle de dessin, conversion des coordonnées souris)

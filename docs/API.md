@@ -10,7 +10,8 @@ consommé par un autre mod.
 
 | Version du mod | Minecraft | Branche | État |
 |---|---|---|---|
-| **3.0.0** | **26.3** | `26.3` | maintenue |
+| **3.1.0** | **26.3** | `26.3` | maintenue |
+| 3.0.0 | 26.3 | `26.3` | remplacée par 3.1.0 (compatible) |
 | 2.0.0 | 26.2 | `26.2` | gelée |
 | 1.x | 1.21.11 | `main` | gelée |
 
@@ -31,7 +32,7 @@ repositories {
     // + les dépôts habituels (maven.fabricmc.net, mavenCentral)
 }
 dependencies {
-    implementation "net.ostore:ultralight:3.0.0"
+    implementation "net.ostore:ultralight:3.1.0"
 }
 ```
 
@@ -45,7 +46,7 @@ dependencies {
 Et dans le `fabric.mod.json` du mod consommateur :
 
 ```json
-"depends": { "ultralight": ">=3.0.0" }
+"depends": { "ultralight": ">=3.1.0" }
 ```
 
 ### À lire avant d'écrire la moindre ligne
@@ -56,6 +57,12 @@ Et dans le `fabric.mod.json` du mod consommateur :
    `extractRenderState` ou un `HudElement`, on ne fait que `panel.render(graphics)` (voir §1).
 3. **Ne jamais coder en dur des codes de touche ou de bouton** : voir l'encadré ci-dessous.
 4. **Fermer ce qu'on ouvre** : `panel.close()` dans `Screen.removed()`.
+5. **Page animée ? `.animated(true)`** sur le panneau (§3). Sans lui, une animation CSS ou
+   `requestAnimationFrame` ne tourne tout simplement pas : vérifié en jeu, 0 frame JS sur
+   environ une seconde.
+6. **Clavier : `panel.keyPressed(key)`** avec le `KeyEvent` complet, plutôt que les codes entiers :
+   c'est la seule forme qui respecte la disposition du clavier (en AZERTY, l'autre envoie Ctrl+Q
+   pour Ctrl+A).
 
 > ### ⚠️ MC 26.3 : l'entrée passe par SDL, plus par GLFW
 >
@@ -76,9 +83,11 @@ Et dans le `fabric.mod.json` du mod consommateur :
 ---
 
 > **Contrainte absolue : tout doit s'exécuter sur le render thread du client.**
-> Le binding JNI met en cache le `JNIEnv` du thread d'init ; un appel depuis un
-> autre thread = corruption mémoire native. En pratique : appelle l'API depuis le rendu
-> (HUD, `Screen.render`, callbacks MC marshalés via `MinecraftClient.execute`).
+> Le binding JNI n'est pas thread-safe : un appel depuis un autre thread corromprait la mémoire
+> native. Depuis la 3.1.0, un tel appel lève immédiatement une `IllegalStateException` qui nomme
+> le thread fautif. En pratique : appelle l'API depuis le rendu, les écrans, les ticks client, et
+> reviens sur le bon thread avec `Minecraft.getInstance().execute(...)` (réponse réseau, tâche
+> asynchrone).
 
 ---
 
@@ -181,10 +190,15 @@ boolean ready = view.isPageReady();
 | `mouseReleased(int x, int y, int mcButton)` | |
 | `scroll(int deltaXpx, int deltaYpx)` | Défilement en pixels. |
 | `charTyped(String text)` | Saisie de texte (événement CHAR). |
-| `keyPressed(int mcKey, int mcMods)` | Codes `InputConstants` (scancodes SDL depuis 26.3 ; mapping interne vers les VK attendus par Ultralight). |
+| `keyPressed(KeyEvent)` / `keyReleased(KeyEvent)` | **Forme recommandée** : l'événement tel que reçu par le `Screen`. Les lettres suivent la disposition du clavier (AZERTY compris), donc les raccourcis et `event.keyCode` côté page sont justes. |
+| `keyPressed(int mcKey, int mcMods)` | Codes `InputConstants` (scancodes SDL depuis 26.3, donc des **positions** : en AZERTY, A arrive comme Q). Conservée pour compatibilité. |
 | `keyReleased(int mcKey, int mcMods)` | |
 | `focus()` / `unfocus()` | Donne/retire le focus clavier à la vue. |
 | `boolean hasInputFocus()` | `true` si un élément éditable (`<input>`…) a le focus. |
+
+Touches transmises : lettres, chiffres, F1–F24, pavé numérique, ponctuation, flèches et touches
+d'édition, modificateurs seuls. **Copier-coller** : Ctrl+C / Ctrl+V dans une page (vérifiés en jeu) passent
+par le presse-papiers de Minecraft, donc celui du système.
 
 ### Curseurs
 ```java
@@ -264,7 +278,8 @@ panel.setPreviewAspect(21.0 / 9.0);   // simule un 21:9 dans la fenêtre actuell
 |---|---|
 | `render(graphics)` | depuis `Screen.extractRenderState` **ou** un `HudElement` : géométrie + dessin. Ne pompe pas le moteur. |
 | `mouseMoved/mouseClicked/mouseReleased/mouseScrolled(...)` | coordonnées **logiques MC** ; renvoie `false` hors du panneau |
-| `keyPressed/keyReleased(mcKey, mcMods)`, `charTyped(text)` | identiques à la vue ; codes tels que reçus par le `Screen` |
+| `keyPressed/keyReleased(KeyEvent)`, `charTyped(text)` | identiques à la vue ; passer l'événement du `Screen` tel quel |
+| `animated(bool)` *(builder)*, `setAnimated(bool)` | page animée : repeinte à chaque frame. Sans lui, une animation se fige (et `requestAnimationFrame` ne tourne pas). Coût : voir la perf plus bas. |
 | `focus()` / `unfocus()` / `hasInputFocus()` | focus clavier |
 | `contains(x, y)`, `drawX/drawY/drawWidth/drawHeight()` | rectangle occupé, en px logiques |
 | `cssWidth()` / `cssHeight()` | viewport CSS courant |

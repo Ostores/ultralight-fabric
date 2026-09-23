@@ -25,10 +25,13 @@ reprendre côté **mod consommateur**, écrits pour **Minecraft 26.3**.
    scancodes SDL (A vaut 4, Entrée 40, Échap 41). Les signatures n'ont pas changé, donc du code
    écrit pour GLFW compile et se comporte mal sans aucun message. Toujours passer par
    `com.mojang.blaze3d.platform.InputConstants` (`MOUSE_BUTTON_LEFT`, `KEY_ESCAPE`…) et
-   transmettre tels quels les codes reçus par le `Screen`.
+   transmettre tel quel ce que reçoit le `Screen`. Pour le clavier, passer le `KeyEvent` complet
+   (`panel.keyPressed(key)`) : c'est la seule forme qui respecte la disposition AZERTY.
 3. **Fermer ce qu'on ouvre.** `panel.close()` (ou `view.close()`) dans `Screen.removed()`. Chaque
    vue coûte environ 16 Mo en 1080p (surface native et texture). Au-delà de 8 vues ouvertes en même
    temps, la bibliothèque écrit un avertissement.
+
+Page animée (CSS, `requestAnimationFrame`) : `.animated(true)` sur le panneau, sinon elle se fige.
 
 ## Ce que fait la version manuelle (et que `UltralightPanel` fait pour toi)
 

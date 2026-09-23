@@ -116,13 +116,13 @@ public final class UltralightDemoScreen extends Screen {
     @Override
     public boolean keyPressed(KeyEvent key) {
         if (key.key() == InputConstants.KEY_ESCAPE) { onClose(); return true; }
-        if (view != null) view.keyPressed(key.key(), key.modifiers());
+        if (view != null) view.keyPressed(key);   // l'événement complet : disposition du clavier respectée
         return true;
     }
 
     @Override
     public boolean keyReleased(KeyEvent key) {
-        if (view != null) view.keyReleased(key.key(), key.modifiers());
+        if (view != null) view.keyReleased(key);
         return true;
     }
 
