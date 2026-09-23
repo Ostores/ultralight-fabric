@@ -92,6 +92,8 @@ final class UltralightPanelProbe {
     /** Instance unique : la réafficher conserve l'avancement de la séquence. */
     private static PanelProbeScreen instance;
     private static boolean worldRequested = false;
+    /** Demande d'appeler renderFrame() depuis le tick client (hors extraction), pour la sonde. */
+    private static volatile boolean tickRenderFrameRequested = false;
 
     private UltralightPanelProbe() {}
 
@@ -106,6 +108,10 @@ final class UltralightPanelProbe {
             if (grabRequested) {
                 grabRequested = false;
                 Screenshot.grab(mc, false);
+            }
+            if (tickRenderFrameRequested) {
+                tickRenderFrameRequested = false;
+                UltralightEngine.renderFrame();   // en jeu, hors extraction : doit etre ignore sans bruit
             }
             if (done) return;
 
@@ -287,7 +293,7 @@ final class UltralightPanelProbe {
                 case 134 -> panel.mouseMoved(logX(350), logY(500));           // zone defilable
                 case 138 -> panel.mouseScrolled(logX(350), logY(500), 0, -3);
                 case 150 -> checkScroll();
-                case 158 -> checkSinglePump();
+                case 158 -> { checkSinglePump(); checkTickRenderFrame(); checkBridgeSignal(); checkDeferredReleases(); }
                 case 168 -> {
                     UltralightEngine.perfEnabled = false;
                     report();
@@ -321,6 +327,71 @@ final class UltralightPanelProbe {
                 fail("garde-fou nom de pont", "un nom non-identifiant a ete accepte");
             } catch (IllegalArgumentException e) {
                 pass("garde-fou nom de pont", "refuse comme prevu");
+            }
+
+            // Nous sommes dans extractRenderState : c'est exactement l'appel qui produisait le
+            // damier et la vue noire. Il doit etre refuse, et le moteur ne doit pas etre pompe.
+            int refused = UltralightEngine.renderFrameRefused;
+            long pumpsBefore = UltralightEngine.perfFrameCount();
+            UltralightEngine.renderFrame();
+            if (UltralightEngine.renderFrameRefused == refused + 1
+                    && UltralightEngine.perfFrameCount() == pumpsBefore) {
+                pass("garde-fou renderFrame() pendant l'extraction", "refuse, moteur non pompe");
+            } else {
+                fail("garde-fou renderFrame() pendant l'extraction", "l'appel a ete execute");
+            }
+            renderFrameSkippedBefore = UltralightEngine.renderFrameSkipped;
+            tickRenderFrameRequested = true;   // verifie au frame 158, apres quelques ticks
+
+            // Alerte sur le nombre de vues : on en ouvre assez pour franchir le seuil.
+            int warningsBefore = UltralightEngine.viewCountWarnings;
+            List<UltralightBrowserView> extra = new ArrayList<>();
+            try {
+                for (int i = UltralightEngine.activeViews.size(); i <= UltralightEngine.VIEW_COUNT_WARN; i++) {
+                    extra.add(new UltralightBrowserView(16, 16, 1.0));
+                }
+            } finally {
+                for (UltralightBrowserView v : extra) v.close();
+            }
+            if (UltralightEngine.viewCountWarnings == warningsBefore + 1) {
+                pass("alerte nombre de vues", "emise au-dela de " + UltralightEngine.VIEW_COUNT_WARN);
+            } else {
+                fail("alerte nombre de vues", (UltralightEngine.viewCountWarnings - warningsBefore)
+                        + " alerte(s) pour " + (extra.size() + 1) + " vues");
+            }
+        }
+
+        private int renderFrameSkippedBefore;
+
+        /** renderFrame() depuis un tick client en jeu : ignore (le moteur est deja pompe). */
+        private void checkTickRenderFrame() {
+            if (UltralightEngine.renderFrameSkipped > renderFrameSkippedBefore) {
+                pass("renderFrame() en jeu hors extraction", "ignore, pas de double pompage");
+            } else {
+                fail("renderFrame() en jeu hors extraction", "non ignore (ou jamais appele)");
+            }
+        }
+
+        /**
+         * Les panneaux de la phase geometrie ont ete fermes pendant l'extraction : leurs textures
+         * doivent avoir ete liberees depuis, au tick client. Une file qui ne se vide pas serait une
+         * fuite (~8 Mo par vue en 1080p).
+         */
+        private void checkDeferredReleases() {
+            int pending = UltralightEngine.pendingReleases();
+            if (pending == 0) pass("liberation differee des textures", "file vide");
+            else              fail("liberation differee des textures", pending + " textures jamais liberees");
+        }
+
+        /** Les messages de la page doivent arriver par le signal, jamais par le vidage de secours. */
+        private void checkBridgeSignal() {
+            UltralightBrowserView v = panel.view();
+            if (v == null) { fail("pont JS sur signal", "pas de vue"); return; }
+            if (v.bridgeFallbackCatches == 0 && v.bridgeSignalDrains > 0) {
+                pass("pont JS sur signal", v.bridgeSignalDrains + " vidages sur signal, 0 rattrapage");
+            } else {
+                fail("pont JS sur signal", v.bridgeSignalDrains + " vidages sur signal, "
+                        + v.bridgeFallbackCatches + " rattrapage(s) par le secours");
             }
         }
 
@@ -590,6 +661,9 @@ final class UltralightPanelProbe {
                 UltralightPanel.Builder b = UltralightPanel.builder().design(1280, 720);
                 if (!c.fullScreen()) b.bounds(0.25f, 0.25f, 0.5f, 0.5f);
                 panel = b.fit(UltralightPanel.Fit.FILL).build();
+                // Un consommateur reel pose toujours un handler : sans lui le drain du pont sort
+                // tout de suite et son cout n'apparaitrait pas dans la mesure.
+                panel.setQueryHandler(msg -> { });
                 String page = perfHtml == null ? null
                         : (c.animated() ? perfHtml.replace("/*ANIM*/", "startAnimation();") : perfHtml);
                 if (page != null) panel.loadHTML(page);
@@ -627,8 +701,9 @@ final class UltralightPanelProbe {
             double p95  = sorted.get((int) (sorted.size() * 0.95)) / 1e6;
             PerfCase c = PERF_CASES[perfCase];
             String pump = c.withPanel()
-                    ? String.format(java.util.Locale.ROOT, " - cycle moteur %.2f ms/frame",
-                                    UltralightEngine.perfAverageMicros() / 1000.0)
+                    ? String.format(java.util.Locale.ROOT, " - cycle moteur %.2f ms/frame (dont pont JS %.1f us)",
+                                    UltralightEngine.perfAverageMicros() / 1000.0,
+                                    UltralightEngine.perfBridgeAverageMicros())
                     : "";
             LOG.info(String.format(java.util.Locale.ROOT,
                     "[ul-panelprobe]   [tour %d] %-28s frame %.2f ms (%.0f FPS) - p95 %.2f ms%s",

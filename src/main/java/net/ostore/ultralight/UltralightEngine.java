@@ -6,12 +6,16 @@ import me.ayydxn.luminescence.platform.impl.StandardULFileSystem;
 import me.ayydxn.luminescence.renderer.ULRenderer;
 import me.ayydxn.luminescence.view.ULView;
 import me.ayydxn.luminescence.view.ULViewConfig;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
+import net.minecraft.client.Minecraft;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -45,13 +49,64 @@ public final class UltralightEngine {
 
     static final AtomicInteger VIEW_COUNTER = new AtomicInteger(0);
 
+    /**
+     * Au-dela de ce nombre de vues ouvertes en meme temps, on previent. Chaque vue coute ~16 Mo en
+     * 1080p (surface native + texture) et un cycle de rendu par frame ; un tel nombre trahit en
+     * general une vue jamais fermee plutot qu'un besoin reel.
+     */
+    static final int VIEW_COUNT_WARN = 8;
+    /** Seuil du prochain avertissement : double a chaque fois, pour qu'une fuite reste visible
+     *  sans inonder le log. */
+    private static int nextViewWarnAt = VIEW_COUNT_WARN;
+    /** Nombre d'avertissements emis (lu par la sonde). */
+    static int viewCountWarnings = 0;
+
+    /** renderFrame() refuses parce qu'appeles pendant l'extraction de la GUI (lu par la sonde). */
+    static int renderFrameRefused = 0;
+    /** renderFrame() ignores parce que le moteur est deja pompe en jeu (lu par la sonde). */
+    static int renderFrameSkipped = 0;
+    private static boolean renderFrameMisuseWarned = false;
+
+    /**
+     * Libérations de textures reportées au prochain tick client, c'est-à-dire entre deux frames.
+     * Une vue fermée pendant le rendu (typiquement depuis extractRenderState ou un HudElement)
+     * peut avoir été dessinée plus tôt dans la même frame : ce dessin est soumis au GPU après
+     * l'extraction, et libérer la texture tout de suite le fait porter sur une texture détruite
+     * (GL_INVALID_OPERATION en OpenGL ; en Vulkan, une image détruite encore utilisée).
+     * Render thread uniquement.
+     */
+    private static final List<Runnable> deferredReleases = new ArrayList<>();
+
+    static void deferRelease(Runnable release) { deferredReleases.add(release); }
+
+    /** Pour la sonde : libérations encore en attente. */
+    static int pendingReleases() { return deferredReleases.size(); }
+
+    private static void runDeferredReleases() {
+        if (deferredReleases.isEmpty()) return;
+        List<Runnable> batch = new ArrayList<>(deferredReleases);
+        deferredReleases.clear();
+        for (Runnable r : batch) {
+            try { r.run(); }
+            catch (Throwable t) { LOG.warn("[ul] libération de texture différée échouée : {}", t.toString()); }
+        }
+    }
+
     // ── Instrumentation optionnelle du coût du cycle moteur (activée par la sonde de perf).
     //    Deux appels à nanoTime par frame quand elle est active, rien du tout sinon.
     static volatile boolean perfEnabled = false;
     private static long perfFrames = 0L;
     private static long perfNanos  = 0L;
+    /** Part du cycle passee a vider le pont JS, toutes vues confondues. */
+    static long perfBridgeNanos = 0L;
 
-    static void perfReset() { perfFrames = 0L; perfNanos = 0L; }
+    static void perfReset() { perfFrames = 0L; perfNanos = 0L; perfBridgeNanos = 0L; }
+
+    /** Cout moyen du drain du pont JS par frame, en microsecondes. */
+    static double perfBridgeAverageMicros() {
+        long f = perfFrames;
+        return f == 0L ? 0.0 : perfBridgeNanos / 1000.0 / f;
+    }
 
     /** Coût moyen d'un cycle update/render/paint, en microsecondes. */
     static double perfAverageMicros() {
@@ -89,6 +144,9 @@ public final class UltralightEngine {
         // L'extraction du MONDE, elle, precede le frame graph, donc aucune passe n'est ouverte, et
         // elle precede aussi la construction de la GUI, ce qui preserve la regle etablie en 26.2.
         LevelExtractionEvents.END_EXTRACTION.register(ctx -> onFrame());
+        // Le tick client tourne entre deux frames, en jeu comme au menu : c'est là que les
+        // textures des vues fermées sont réellement libérées (voir deferredReleases).
+        ClientTickEvents.END_CLIENT_TICK.register(mc -> runDeferredReleases());
     }
 
     /** Initialisation native — appelée une seule fois, sur le render thread, au premier frame. */
@@ -176,13 +234,47 @@ public final class UltralightEngine {
 
     /**
      * Pompe un cycle update/render/paint. Le moteur le fait déjà tout seul à chaque frame tant
-     * qu'un monde est rendu : <b>les mods n'ont normalement pas à appeler ceci</b>.
+     * qu'un monde est rendu : <b>les mods n'ont normalement pas à appeler ceci</b>. Seul usage
+     * légitime : faire vivre une vue hors monde (menu titre), depuis un tick client.
      *
-     * <p>⚠️ À n'appeler que depuis un contexte qui n'est PAS une phase d'extraction de la GUI
-     * (donc ni {@code Screen.extractRenderState}, ni un {@code HudElement}) : voir l'en-tête de
-     * cette classe. Un tick client convient.
+     * <p>Deux appels sont ignorés, pour qu'une erreur d'usage ne puisse plus casser le rendu :
+     * <ul>
+     *   <li>pendant l'extraction de la GUI ({@code Screen.extractRenderState}, un
+     *       {@code HudElement}) : écrire une texture à ce moment corrompt le lot de dessins de
+     *       Minecraft (page en damier derrière la scène, vue noire). Signalé une fois, avec la pile
+     *       de l'appelant ;</li>
+     *   <li>en jeu : le pilote de frame a déjà pompé, un second cycle ne ferait que doubler le coût.</li>
+     * </ul>
      */
-    public static void renderFrame() { onFrame(); }
+    public static void renderFrame() {
+        if (calledFromGuiExtraction()) {
+            renderFrameRefused++;
+            if (!renderFrameMisuseWarned) {
+                renderFrameMisuseWarned = true;
+                LOG.warn("[ul] renderFrame() appelé pendant l'extraction de la GUI : appel ignoré. "
+                        + "Écrire une texture à ce moment casse le rendu de Minecraft (damier, vue noire). "
+                        + "En jeu le moteur se pompe tout seul : dans extractRenderState, ne faire que "
+                        + "panel.render(graphics). Appelant :", new Throwable("appel de renderFrame()"));
+            }
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null && mc.level != null) { renderFrameSkipped++; return; }
+        onFrame();
+    }
+
+    /**
+     * Vrai si la pile traverse une méthode d'extraction de la GUI de Minecraft. MC 26.x n'étant
+     * plus obfusqué, ces noms sont stables : {@code Gui.extractRenderState} pour le HUD,
+     * {@code Screen.extractRenderStateWithTooltipAndSubtitles} pour les écrans. L'extraction du
+     * MONDE (d'où pompe notre pilote) vit dans {@code net.minecraft.client.renderer}, hors de ce
+     * filtre. Coût d'un parcours de pile, acceptable : renderFrame() est rare par construction.
+     */
+    private static boolean calledFromGuiExtraction() {
+        return StackWalker.getInstance().walk(frames -> frames.anyMatch(f ->
+                f.getClassName().startsWith("net.minecraft.client.gui.")
+                && f.getMethodName().startsWith("extract")));
+    }
 
     static void onFrame() {
         if (!initAttempted) { initAttempted = true; doInit(); }
@@ -213,6 +305,17 @@ public final class UltralightEngine {
         }
     }
 
-    static void registerView(UltralightBrowserView view)   { activeViews.add(view); }
+    static void registerView(UltralightBrowserView view) {
+        activeViews.add(view);
+        int n = activeViews.size();
+        if (n > nextViewWarnAt) {
+            nextViewWarnAt *= 2;
+            viewCountWarnings++;
+            LOG.warn("[ul] {} vues Ultralight ouvertes en même temps. Chacune coûte ~16 Mo en 1080p "
+                    + "(surface native + texture) et un cycle de rendu par frame. Vérifier que chaque "
+                    + "vue est fermée (panel.close() dans Screen.removed()) : une vue oubliée continue "
+                    + "de tourner.", n);
+        }
+    }
     static void unregisterView(UltralightBrowserView view) { activeViews.remove(view); }
 }

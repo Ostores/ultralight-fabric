@@ -146,8 +146,8 @@ public final class UltralightBrowserView {
     //  API publique — render thread
     // =========================================================================
 
-    public void loadHTML(String html) { pageReady.set(false); view.loadHTML(sanitizeForLoad(html)); }
-    public void loadURL(String url)   { pageReady.set(false); view.loadURL(url); }
+    public void loadHTML(String html) { pageReady.set(false); bridgeSignaled = true; view.loadHTML(sanitizeForLoad(html)); }
+    public void loadURL(String url)   { pageReady.set(false); bridgeSignaled = true; view.loadURL(url); }
 
     /**
      * Convertit les caractères hors du plan multilingue de base (BMP) — c.-à-d. les paires de
@@ -183,7 +183,11 @@ public final class UltralightBrowserView {
         if (physicalWidth <= 0 || physicalHeight <= 0) return;   // fenêtre minimisée
         if (physicalWidth == texW && physicalHeight == texH && mcTexture != null) return;
         view.resize(physicalWidth, physicalHeight);
-        destroyMcTexture();
+        // Libération immédiate ici, et elle est sûre : UltralightPanel redimensionne AVANT de
+        // dessiner et ne dessine rien tant que la nouvelle texture n'est pas prête. La reporter
+        // serait même faux : la nouvelle texture reprend le même identifiant, et une libération
+        // différée par identifiant emporterait la nouvelle.
+        destroyMcTexture(false);
         needsFullUpload = true;
         textureReady    = false;
         // Sans ça, Ultralight ne re-rastérise que ce qu'il juge sale : sur la surface fraîchement
@@ -227,7 +231,7 @@ public final class UltralightBrowserView {
         // detruite, et le backend SDL avalerait les caracteres suivants.
         if (textInputActive) { textInputActive = false; notifyTextInput(false); }
         UltralightEngine.unregisterView(this);
-        destroyMcTexture();
+        destroyMcTexture(true);
         textureReady = false;
         pageReady.set(false);
         try { view.destroy(); } catch (Throwable ignored) {}
@@ -242,28 +246,28 @@ public final class UltralightBrowserView {
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_MOVED, x, y, MouseButton.NONE)) {
             view.fireMouseEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("souris", t); }
     }
 
     public void mousePressed(int x, int y, int mcButton) {
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_DOWN, x, y, mapButton(mcButton))) {
             view.fireMouseEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("souris", t); }
     }
 
     public void mouseReleased(int x, int y, int mcButton) {
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_UP, x, y, mapButton(mcButton))) {
             view.fireMouseEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("souris", t); }
     }
 
     public void scroll(int deltaXpixels, int deltaYpixels) {
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULScrollEvent e = new ULScrollEvent(ScrollEventType.SCROLL_BY_PIXEL, deltaXpixels, deltaYpixels)) {
             view.fireScrollEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] scroll: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("molette", t); }
     }
 
     public void charTyped(String text) {
@@ -271,7 +275,19 @@ public final class UltralightBrowserView {
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULKeyEvent e = new ULKeyEvent(KeyEventType.CHAR, 0, 0, 0, text, text, false, false, false)) {
             view.fireKeyEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] char: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("texte", t); }
+    }
+
+    /** Echec d'input deja signale : une page qui ne recoit plus rien doit se voir sans debug. */
+    private boolean inputFailureWarned = false;
+
+    private void inputFailed(String kind, Throwable t) {
+        if (!inputFailureWarned) {
+            inputFailureWarned = true;
+            LOG.warn("[ul-view:{}] echec d'envoi d'un evenement ({}) a la page, signale une seule fois : {}",
+                    viewId, kind, t.toString());
+        }
+        LOG.debug("[ul-view:{}] {} : {}", viewId, kind, t.getMessage());
     }
 
     public void keyPressed(int mcKey, int mcModifiers) {
@@ -300,7 +316,7 @@ public final class UltralightBrowserView {
         try (ULKeyEvent e = new ULKeyEvent(type, mapModifiers(mcModifiers),
                 mcKeyToWindowsVK(mcKey), 0, "", "", false, false, false)) {
             view.fireKeyEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] key: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("clavier", t); }
     }
 
     /**
@@ -380,7 +396,17 @@ public final class UltralightBrowserView {
         }
     }
 
-    void onRendererTick() { paintSurface(); drainBridge(); syncTextInputFocus(); }
+    void onRendererTick() {
+        paintSurface();
+        if (UltralightEngine.perfEnabled) {
+            long t0 = System.nanoTime();
+            drainBridge();
+            UltralightEngine.perfBridgeNanos += System.nanoTime() - t0;
+        } else {
+            drainBridge();
+        }
+        syncTextInputFocus();
+    }
 
     /** Focus texte deja signale a Minecraft. */
     private boolean textInputActive = false;
@@ -601,12 +627,19 @@ public final class UltralightBrowserView {
     /** Refus de taille deja signale. */
     private boolean textureTooLargeWarned = false;
 
-    private void destroyMcTexture() {
+    /**
+     * @param deferred reporter la libération au prochain tick (fermeture de la vue) : un dessin de
+     *        la frame en cours peut encore référencer la texture. L'identifiant n'est plus jamais
+     *        réutilisé ensuite, la libération différée par identifiant est donc sans ambiguïté.
+     */
+    private void destroyMcTexture(boolean deferred) {
         Minecraft mc = Minecraft.getInstance();
         // release() ferme la texture, donc la NativeImage, donc libere notre tampon natif. Sans
         // TextureManager (arret du jeu), on ferme nous-memes : sinon le tampon fuit.
-        if (texIdentifier != null && mc != null) {
-            mc.getTextureManager().release(texIdentifier);
+        Identifier id = texIdentifier;
+        if (id != null && mc != null) {
+            if (deferred) UltralightEngine.deferRelease(() -> mc.getTextureManager().release(id));
+            else          mc.getTextureManager().release(id);
         } else if (mcTexture != null) {
             mcTexture.close();
         }
@@ -618,21 +651,44 @@ public final class UltralightBrowserView {
     }
 
     // =========================================================================
-    //  Pont JS↔Java — par FILE (drainée à chaque frame)
+    //  Pont JS↔Java — par FILE, vidée à la demande
     // =========================================================================
     // Avec Luminescence 1.4, le callback natif d'un JSFunction ne se déclenche PAS pour les
     // appels initiés par la page (seulement pour les appels Java via ctx.evaluate). On installe
-    // donc une fonction JS pure qui EMPILE les messages dans window.__ulq, et on DRAINE cette
-    // file côté Java à chaque onRendererTick via evaluate (qui, lui, fonctionne).
+    // donc une fonction JS pure qui EMPILE les messages dans window.__ulq, et on vide cette file
+    // côté Java via evaluate (qui, lui, fonctionne).
+    //
+    // Vider à chaque frame coûtait un verrou de contexte JS et une évaluation par vue et par
+    // frame, même sans le moindre message. La fonction signale donc le passage de la file de vide
+    // à non vide par un message console marqueur, que le listener console (lui fiable) intercepte :
+    // on ne vide que sur signal. Un vidage de secours tourne quand même toutes les
+    // BRIDGE_FALLBACK_FRAMES frames : il réinstalle la fonction si la page l'a perdue et rattrape
+    // un signal manqué, qu'on signale alors, car la latence du pont en souffrirait.
 
     private static final String ULQ = "__ulq";
+    /** Message console émis par la page quand la file passe de vide à non vide. */
+    private static final String BRIDGE_SIGNAL = "\u0001ulq";
+    private static final int BRIDGE_FALLBACK_FRAMES = 30;
+
+    /** La page a signalé des messages en attente (écrit par le listener console). */
+    private volatile boolean bridgeSignaled = true;
+    private int framesSinceDrain = 0;
+    /** Vidages déclenchés par le signal, et messages rattrapés par le secours (lus par la sonde). */
+    int bridgeSignalDrains = 0;
+    int bridgeFallbackCatches = 0;
+    private boolean bridgeFallbackWarned = false;
+
+    /** La fonction du pont, en JS : empile, et signale le passage de vide à non vide. */
+    private static String bridgeFunctionJs(String name) {
+        return "window['" + name + "']=function(d){var q=(window." + ULQ + "=window." + ULQ
+                + "||[]);q.push(String(d));if(q.length===1)console.log('\\u0001ulq');};";
+    }
 
     private void installBridge() {
         try (JSContext ctx = view.acquireJSContextLock()) {
             String name = bridgeName;
             ctx.evaluate(
-                "window['" + name + "']=function(d){(window." + ULQ + "=window." + ULQ
-                + "||[]).push(String(d));};window." + ULQ + "=window." + ULQ + "||[];"
+                bridgeFunctionJs(name) + "window." + ULQ + "=window." + ULQ + "||[];"
                 // Capture des erreurs JS non-catchées pour diagnostic (lisible via probe Java).
                 + "if(!window.__ulErrHook){window.__ulErrHook=1;window.addEventListener('error',function(e){"
                 + "window.__ulErr=(window.__ulErr?window.__ulErr+' | ':'')+((e&&e.message)||e)+' @'+((e&&e.filename)||'')+':'+((e&&e.lineno)||0);});}");
@@ -655,21 +711,29 @@ public final class UltralightBrowserView {
         }
     }
 
-    /** Dépile window.__ulq côté Java et dispatch chaque message au handler. Appelé chaque frame. */
+    /**
+     * Dépile window.__ulq côté Java et dispatch chaque message au handler. Appelé chaque frame,
+     * mais ne touche au contexte JS que sur signal de la page, ou toutes les
+     * {@link #BRIDGE_FALLBACK_FRAMES} frames par sécurité.
+     */
     private void drainBridge() {
         Consumer<String> handler = queryHandler;
         if (handler == null) return;
+        boolean signaled = bridgeSignaled;
+        if (!signaled && ++framesSinceDrain < BRIDGE_FALLBACK_FRAMES) return;
+        bridgeSignaled = false;
+        framesSinceDrain = 0;
         String joined;
         try (JSContext ctx = view.acquireJSContextLock()) {
-            // On (ré)installe le pont dans CE contexte (le monde JS vivant de la page) à chaque
-            // frame : à onWindowObjectReady, Luminescence 1.4 fournit un contexte qui est ensuite
-            // remplacé quand la page charge, si bien que window.<bridge> posée là n'atterrit pas
-            // dans le monde de la page. Le drain, lui, tape le contexte vivant — on y garantit donc
-            // la fonction pour que ses push aillent dans le même window.__ulq que celui qu'on draine.
+            // On (ré)installe le pont dans CE contexte (le monde JS vivant de la page) : à
+            // onWindowObjectReady, Luminescence 1.4 fournit un contexte qui est ensuite remplacé
+            // quand la page charge, si bien que window.<bridge> posée là n'atterrit pas dans le
+            // monde de la page. Le drain, lui, tape le contexte vivant : on y garantit donc la
+            // fonction pour que ses push aillent dans le même window.__ulq que celui qu'on draine.
+            // Un chargement de page lève le signal, pour que cette installation suive aussitôt.
             String name = bridgeName;
             JSValue r = ctx.evaluate("(function(){"
-                + "if(typeof window['" + name + "']!=='function')window['" + name
-                + "']=function(d){(window." + ULQ + "=window." + ULQ + "||[]).push(String(d));};"
+                + "if(typeof window['" + name + "']!=='function')" + bridgeFunctionJs(name)
                 + "var q=window." + ULQ + ";if(!q||!q.length)return '';window." + ULQ
                 + "=[];return q.join('\\u0001');})()");
             joined = (r == null) ? null : r.toString();
@@ -677,7 +741,18 @@ public final class UltralightBrowserView {
             return;
         }
         if (joined == null || joined.isEmpty()) return;
-        for (String msg : joined.split("")) {
+        if (signaled) {
+            bridgeSignalDrains++;
+        } else {
+            bridgeFallbackCatches++;
+            if (!bridgeFallbackWarned) {
+                bridgeFallbackWarned = true;
+                LOG.warn("[ul-view:{}] messages du pont JS rattrapés par le vidage de secours : le "
+                        + "signal de la page n'arrive pas, la latence du pont monte à ~{} frames.",
+                        viewId, BRIDGE_FALLBACK_FRAMES);
+            }
+        }
+        for (String msg : joined.split("\u0001")) {
             if (msg.isEmpty()) continue;
             try { handler.accept(msg); }
             catch (Throwable t) { LOG.warn("[ul-view:{}] Bridge handler error: {}", viewId, t.getMessage()); }
@@ -698,6 +773,7 @@ public final class UltralightBrowserView {
         public void onDOMReady(long frameID, boolean isMainFrame, String url) {
             if (!isMainFrame) return;
             pageReady.set(true);
+            bridgeSignaled = true;   // le contexte JS vivant est là : y installer le pont sans attendre
             Consumer<Void> cb = onPageReadyCallback;
             if (cb != null) Minecraft.getInstance().execute(() -> cb.accept(null));
         }
@@ -719,6 +795,8 @@ public final class UltralightBrowserView {
         @Override
         public void onConsoleMessageAdded(ULMessageSource source, ULMessageLevel level,
                                           String message, int line, int column, String sourceID) {
+            // Signal interne du pont, pas un message de la page : on ne le logge pas.
+            if (BRIDGE_SIGNAL.equals(message)) { bridgeSignaled = true; return; }
             String tag = "[ul-console:" + viewId + "/" + source + "] " + message;
             switch (level) {
                 case ERROR   -> LOG.error(tag);

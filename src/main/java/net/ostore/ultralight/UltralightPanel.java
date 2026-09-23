@@ -474,15 +474,20 @@ public final class UltralightPanel implements AutoCloseable {
         return true;
     }
 
-    public boolean mouseClicked(double mouseX, double mouseY, int glfwButton) {
+    /**
+     * @param mcButton le bouton tel que Minecraft le fournit ({@code MouseButtonEvent.button()}),
+     *        à comparer uniquement à {@code InputConstants.MOUSE_BUTTON_*} : depuis MC 26.3 ce sont
+     *        des codes SDL (gauche/milieu/droite = 1/2/3), plus les 0/1/2 de GLFW.
+     */
+    public boolean mouseClicked(double mouseX, double mouseY, int mcButton) {
         if (view == null || !contains(mouseX, mouseY)) return false;
-        view.mousePressed(vx(mouseX), vy(mouseY), glfwButton);
+        view.mousePressed(vx(mouseX), vy(mouseY), mcButton);
         return true;
     }
 
-    public boolean mouseReleased(double mouseX, double mouseY, int glfwButton) {
+    public boolean mouseReleased(double mouseX, double mouseY, int mcButton) {
         if (view == null || !contains(mouseX, mouseY)) return false;
-        view.mouseReleased(vx(mouseX), vy(mouseY), glfwButton);
+        view.mouseReleased(vx(mouseX), vy(mouseY), mcButton);
         return true;
     }
 
@@ -492,15 +497,20 @@ public final class UltralightPanel implements AutoCloseable {
         return true;
     }
 
-    public boolean keyPressed(int glfwKey, int glfwModifiers) {
+    /**
+     * @param mcKey la touche telle que Minecraft la fournit ({@code KeyEvent.key()}), à transmettre
+     *        telle quelle : depuis MC 26.3 ce sont des scancodes SDL (A = 4, Entrée = 40), sans
+     *        rapport avec les codes GLFW. Comparer uniquement à {@code InputConstants.KEY_*}.
+     */
+    public boolean keyPressed(int mcKey, int mcModifiers) {
         if (view == null) return false;
-        view.keyPressed(glfwKey, glfwModifiers);
+        view.keyPressed(mcKey, mcModifiers);
         return true;
     }
 
-    public boolean keyReleased(int glfwKey, int glfwModifiers) {
+    public boolean keyReleased(int mcKey, int mcModifiers) {
         if (view == null) return false;
-        view.keyReleased(glfwKey, glfwModifiers);
+        view.keyReleased(mcKey, mcModifiers);
         return true;
     }
 
