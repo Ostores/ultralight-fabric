@@ -1,5 +1,45 @@
 # Changelog
 
+## 3.1.0 : Minecraft 26.3
+
+Compatible avec la 3.0.0 : rien à changer pour continuer à compiler. Deux nouveautés méritent
+quand même une ligne de code : `.animated(true)` pour une page animée, et `keyPressed(KeyEvent)`.
+
+### Nouveau
+
+- **Copier-coller** : le presse-papiers d'Ultralight n'était branché nulle part, Ctrl+C / Ctrl+V
+  dans une page ne faisaient rien. Il passe désormais par celui de Minecraft (donc du système).
+- **Pages animées : `UltralightPanel.Builder.animated(true)`** (et `setAnimated` à chaud, aussi sur
+  la vue). Vérifié en jeu : sans ce réglage, une page qui s'anime sans interaction ne tourne
+  **pas du tout** (0 frame `requestAnimationFrame` et 0 peinture sur 120 frames de jeu, environ une seconde). Avec : 79 frames
+  JS et 73 peintures sur la même durée. `requestRepaint()` appelé à chaque frame faisait la même
+  chose, mais n'était documenté nulle part hors de la javadoc.
+- **`keyPressed(KeyEvent)` / `keyReleased(KeyEvent)`**, sur le panneau et la vue. Les lettres y
+  suivent la disposition du clavier : avec les codes entiers (positions physiques), la touche A
+  d'un AZERTY arrive comme un Q, donc Ctrl+A devient Ctrl+Q et Ctrl+Z devient Ctrl+W.
+- **Table de touches complète** : F1–F24, pavé numérique, ponctuation, modificateurs seuls, Verr.
+  Maj, etc. Ces touches arrivaient à la page avec `keyCode` 0.
+- **Logs du moteur** : les messages internes d'Ultralight arrivent dans le log de Minecraft
+  (`ultralight/native` ; erreurs et avertissements visibles, le reste en debug).
+
+### Fiabilité
+
+- **Garde de thread** : tout appel à l'API depuis un autre thread que le render thread lève une
+  `IllegalStateException` qui nomme le thread, au lieu de corrompre la mémoire native et de
+  crasher plus tard, ailleurs, sans explication.
+
+### Nettoyage
+
+- `UltralightJsBridge` supprimée : inutilisée, et impossible à instancier hors de la bibliothèque.
+
+### Sonde
+
+23 vérifications automatiques (16 en 3.0.0) : copier, coller, touches F2 et virgule, lettre en
+disposition AZERTY, page animée, garde de thread. Le test du presse-papiers sauvegarde puis
+restaure le contenu du joueur.
+
+---
+
 ## 3.0.0 : Minecraft 26.3
 
 Portage sur **Minecraft 26.3**, corrections pour l'usage par plusieurs mods, et une série de
