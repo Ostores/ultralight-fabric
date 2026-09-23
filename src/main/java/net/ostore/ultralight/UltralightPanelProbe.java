@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.client.input.KeyEvent;
 import com.mojang.blaze3d.platform.cursor.CursorType;
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
 
@@ -181,6 +182,11 @@ final class UltralightPanelProbe {
         private final List<String> results = new ArrayList<>();
         private volatile CursorType cursorShape = null;
 
+        // -- verifications 3.1.0 (dans la phase input) --
+        private UltralightPanel animPanel;
+        private String savedClipboard;
+        private int animPaints0, animPaints1, animRaf0, animRaf1;
+
         // -- phase typing (frappe reelle) --
         private boolean typingPhase = false;
         private String lastTyped = "";
@@ -294,7 +300,53 @@ final class UltralightPanelProbe {
                 case 138 -> panel.mouseScrolled(logX(350), logY(500), 0, -3);
                 case 150 -> checkScroll();
                 case 158 -> { checkSinglePump(); checkTickRenderFrame(); checkBridgeSignal(); checkDeferredReleases(); }
-                case 168 -> {
+                case 170 -> checkThreadGuard();
+                // Presse-papiers : Ctrl+C sur un texte selectionne, puis Ctrl+V dans un champ vide.
+                // Le contenu du presse-papiers du joueur est sauvegarde puis restaure.
+                case 172 -> {
+                    savedClipboard = Minecraft.getInstance().keyboardHandler.getClipboard();
+                    panel.executeJavaScript("var t=document.getElementById('txt');t.focus();"
+                            + "t.value='copie-ul';t.select();");
+                }
+                case 174 -> ctrl(InputConstants.KEY_C);
+                case 184 -> {
+                    String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
+                    if ("copie-ul".equals(clip)) pass("copier (Ctrl+C)", "presse-papiers = copie-ul");
+                    else                         fail("copier (Ctrl+C)", "presse-papiers = " + clip);
+                    Minecraft.getInstance().keyboardHandler.setClipboard("colle-ul");
+                    panel.executeJavaScript("var t=document.getElementById('txt');t.value='';t.focus();");
+                }
+                case 186 -> ctrl(InputConstants.KEY_V);
+                case 198 -> {
+                    String v = panel.view().evalString("document.getElementById('txt').value");
+                    if ("colle-ul".equals(v)) pass("coller (Ctrl+V)", "champ = colle-ul");
+                    else                      fail("coller (Ctrl+V)", "champ = " + v);
+                    Minecraft.getInstance().keyboardHandler.setClipboard(
+                            savedClipboard == null ? "" : savedClipboard);
+                }
+                // Touches hors lettres/chiffres, et lettre en disposition AZERTY.
+                case 200 -> { panel.keyPressed(InputConstants.KEY_F2, 0); panel.keyReleased(InputConstants.KEY_F2, 0); }
+                case 210 -> checkKeyCode("touche F2", 113);
+                case 212 -> { panel.keyPressed(InputConstants.KEY_COMMA, 0); panel.keyReleased(InputConstants.KEY_COMMA, 0); }
+                case 222 -> checkKeyCode("touche virgule", 188);
+                case 224 -> {
+                    // AZERTY : la touche qui porte le A est a la position du Q QWERTY.
+                    KeyEvent a = new KeyEvent(InputConstants.KEY_Q, 'a', 0);
+                    panel.keyPressed(a);
+                    panel.keyReleased(a);
+                }
+                case 234 -> checkKeyCode("lettre selon la disposition (A AZERTY)", 65);
+                // Animation : d'abord sans animated(), pour documenter le comportement, puis avec.
+                case 240 -> startAnimPanel();
+                case 320 -> { animPaints0 = animPaints(); animRaf0 = animRaf(); }
+                case 440 -> {
+                    animPaints1 = animPaints(); animRaf1 = animRaf();
+                    LOG.info("[ul-panelprobe] animation SANS animated() : {} frames JS, {} peintures sur 120 frames",
+                            animRaf1 - animRaf0, animPaints1 - animPaints0);
+                    animPanel.setAnimated(true);
+                }
+                case 560 -> checkAnimated();
+                case 562 -> {
                     UltralightEngine.perfEnabled = false;
                     report();
                     if (runPerf() && !perfPhase) { inputPhase = false; startPerfPhase(); }
@@ -381,6 +433,67 @@ final class UltralightPanelProbe {
             int pending = UltralightEngine.pendingReleases();
             if (pending == 0) pass("liberation differee des textures", "file vide");
             else              fail("liberation differee des textures", pending + " textures jamais liberees");
+        }
+
+        private void ctrl(int key) {
+            panel.keyPressed(key, InputConstants.MOD_CONTROL);
+            panel.keyReleased(key, InputConstants.MOD_CONTROL);
+        }
+
+        private void checkKeyCode(String what, int expected) {
+            String ev = last("key");
+            String code = field(ev, "code");
+            if (String.valueOf(expected).equals(code)) pass(what, "keyCode " + code);
+            else                                       fail(what, "keyCode " + code + " (attendu " + expected + ")");
+        }
+
+        /** Un appel depuis un autre thread doit lever une exception AVANT tout appel natif. */
+        private void checkThreadGuard() {
+            Throwable[] got = { null };
+            Thread t = new Thread(() -> {
+                try { panel.view().focus(); } catch (Throwable e) { got[0] = e; }
+            }, "ul-probe-autre-thread");
+            t.start();
+            try { t.join(2000); } catch (InterruptedException ignored) { }
+            if (got[0] instanceof IllegalStateException) pass("garde de thread", "refuse hors render thread");
+            else                                         fail("garde de thread", "recu " + got[0]);
+        }
+
+        private void startAnimPanel() {
+            animPanel = UltralightPanel.builder()
+                    .design(640, 360)
+                    .bounds(0.6f, 0.6f, 0.35f, 0.35f)
+                    .fit(UltralightPanel.Fit.FILL)
+                    .build();
+            if (perfHtml != null) {
+                animPanel.loadHTML(perfHtml.replace("/*ANIM*/", "startAnimation();"
+                        + "window.__raf=0;(function c(){window.__raf++;requestAnimationFrame(c);})();"));
+            }
+        }
+
+        private int animPaints() {
+            return animPanel.view() == null ? 0 : animPanel.view().paintCount;
+        }
+
+        private int animRaf() {
+            if (animPanel.view() == null) return 0;
+            double v = num(animPanel.view().evalString("window.__raf||0"));
+            return Double.isNaN(v) ? 0 : (int) v;
+        }
+
+        /**
+         * Avec animated(), l'animation JS doit tourner ET chacune de ses frames doit atteindre
+         * l'ecran. On compare aux frames JS, pas aux frames du jeu : Ultralight cadence
+         * requestAnimationFrame a ~60 Hz, quel que soit le taux de rafraichissement de Minecraft.
+         */
+        private void checkAnimated() {
+            int paints = animPaints() - animPaints1;
+            int raf = animRaf() - animRaf1;
+            String detail = raf + " frames JS, " + paints + " peintures sur 120 frames de jeu";
+            if (raf >= 30 && paints >= raf * 0.8) pass("page animee avec animated()", detail);
+            else                                  fail("page animee avec animated()", detail);
+            animPanel.close();
+            animPanel = null;
         }
 
         /** Les messages de la page doivent arriver par le signal, jamais par le vidage de secours. */
@@ -585,6 +698,7 @@ final class UltralightPanelProbe {
 
             if (panel == null) return;
             panel.render(graphics);
+            if (animPanel != null) animPanel.render(graphics);
 
             if (typingPhase) { typingTick(); return; }
             if (inputPhase) { inputTick(); return; }
@@ -726,7 +840,7 @@ final class UltralightPanelProbe {
         public boolean keyPressed(net.minecraft.client.input.KeyEvent key) {
             if (typingPhase) {
                 LOG.info("[ul-panelprobe] MC -> ecran : keyPressed code={} mods={}", key.key(), key.modifiers());
-                if (panel != null) panel.keyPressed(key.key(), key.modifiers());
+                if (panel != null) panel.keyPressed(key);
                 return true;
             }
             return super.keyPressed(key);
@@ -735,6 +849,7 @@ final class UltralightPanelProbe {
         @Override
         public void removed() {
             if (panel != null) { panel.close(); panel = null; }
+            if (animPanel != null) { animPanel.close(); animPanel = null; }
         }
 
         @Override public boolean shouldCloseOnEsc() { return false; }

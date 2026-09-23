@@ -22,6 +22,7 @@ import me.ayydxn.luminescence.view.ULViewListener;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.input.KeyEvent;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.Identifier;
@@ -122,6 +123,7 @@ public final class UltralightBrowserView {
      *         une exception claire. {@link UltralightPanel} gère cette attente tout seul.
      */
     public UltralightBrowserView(int width, int height, double deviceScale) {
+        UltralightEngine.checkRenderThread("new UltralightBrowserView");
         if (!UltralightEngine.isReady()) {
             throw new IllegalStateException(
                     "UltralightEngine n'est pas prêt : l'init native est différée au 1er frame rendu. "
@@ -146,8 +148,15 @@ public final class UltralightBrowserView {
     //  API publique — render thread
     // =========================================================================
 
-    public void loadHTML(String html) { pageReady.set(false); bridgeSignaled = true; view.loadHTML(sanitizeForLoad(html)); }
-    public void loadURL(String url)   { pageReady.set(false); bridgeSignaled = true; view.loadURL(url); }
+    public void loadHTML(String html) {
+        UltralightEngine.checkRenderThread("loadHTML");
+        pageReady.set(false); bridgeSignaled = true; view.loadHTML(sanitizeForLoad(html));
+    }
+
+    public void loadURL(String url) {
+        UltralightEngine.checkRenderThread("loadURL");
+        pageReady.set(false); bridgeSignaled = true; view.loadURL(url);
+    }
 
     /**
      * Convertit les caractères hors du plan multilingue de base (BMP) — c.-à-d. les paires de
@@ -180,6 +189,7 @@ public final class UltralightBrowserView {
      * {@code UltralightPanel} se charge (redimensionnement temporisé).
      */
     public void resize(int physicalWidth, int physicalHeight) {
+        UltralightEngine.checkRenderThread("resize");
         if (physicalWidth <= 0 || physicalHeight <= 0) return;   // fenêtre minimisée
         if (physicalWidth == texW && physicalHeight == texH && mcTexture != null) return;
         view.resize(physicalWidth, physicalHeight);
@@ -201,6 +211,7 @@ public final class UltralightBrowserView {
     }
 
     public void executeJavaScript(String script) {
+        UltralightEngine.checkRenderThread("executeJavaScript");
         try { view.evaluateScript(script, new String[1]); }
         catch (Throwable e) { LOG.debug("[ul-view:{}] JS error: {}", viewId, e.getMessage()); }
     }
@@ -227,6 +238,7 @@ public final class UltralightBrowserView {
     public ULView getView() { return view; }
 
     public void close() {
+        UltralightEngine.checkRenderThread("close");
         // Sans ca, Minecraft resterait persuade qu'une saisie texte est en cours dans une vue
         // detruite, et le backend SDL avalerait les caracteres suivants.
         if (textInputActive) { textInputActive = false; notifyTextInput(false); }
@@ -243,6 +255,7 @@ public final class UltralightBrowserView {
     // =========================================================================
 
     public void mouseMoved(int x, int y) {
+        UltralightEngine.checkRenderThread("mouseMoved");
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_MOVED, x, y, MouseButton.NONE)) {
             view.fireMouseEvent(e);
@@ -250,6 +263,7 @@ public final class UltralightBrowserView {
     }
 
     public void mousePressed(int x, int y, int mcButton) {
+        UltralightEngine.checkRenderThread("mousePressed");
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_DOWN, x, y, mapButton(mcButton))) {
             view.fireMouseEvent(e);
@@ -257,6 +271,7 @@ public final class UltralightBrowserView {
     }
 
     public void mouseReleased(int x, int y, int mcButton) {
+        UltralightEngine.checkRenderThread("mouseReleased");
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_UP, x, y, mapButton(mcButton))) {
             view.fireMouseEvent(e);
@@ -264,6 +279,7 @@ public final class UltralightBrowserView {
     }
 
     public void scroll(int deltaXpixels, int deltaYpixels) {
+        UltralightEngine.checkRenderThread("scroll");
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULScrollEvent e = new ULScrollEvent(ScrollEventType.SCROLL_BY_PIXEL, deltaXpixels, deltaYpixels)) {
             view.fireScrollEvent(e);
@@ -271,6 +287,7 @@ public final class UltralightBrowserView {
     }
 
     public void charTyped(String text) {
+        UltralightEngine.checkRenderThread("charTyped");
         if (text == null || text.isEmpty()) return;
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULKeyEvent e = new ULKeyEvent(KeyEventType.CHAR, 0, 0, 0, text, text, false, false, false)) {
@@ -290,14 +307,39 @@ public final class UltralightBrowserView {
         LOG.debug("[ul-view:{}] {} : {}", viewId, kind, t.getMessage());
     }
 
+    /**
+     * Touche pressée, codes tels que Minecraft les fournit ({@code KeyEvent.key()} = position
+     * physique). Préférer {@link #keyPressed(KeyEvent)} : cette forme ne connaît pas la
+     * disposition du clavier, donc en AZERTY la touche A arrive à la page comme un Q
+     * (Ctrl+A devient Ctrl+Q, Ctrl+Z devient Ctrl+W).
+     */
     public void keyPressed(int mcKey, int mcModifiers) {
+        UltralightEngine.checkRenderThread("keyPressed");
         forcePaint = REPAINT_AFTER_INPUT;
-        fireKey(KeyEventType.RAW_KEY_DOWN, mcKey, mcModifiers);
+        fireKey(KeyEventType.RAW_KEY_DOWN, mcKey, 0, mcModifiers);
     }
 
     public void keyReleased(int mcKey, int mcModifiers) {
+        UltralightEngine.checkRenderThread("keyReleased");
         forcePaint = REPAINT_AFTER_INPUT;
-        fireKey(KeyEventType.KEY_UP, mcKey, mcModifiers);
+        fireKey(KeyEventType.KEY_UP, mcKey, 0, mcModifiers);
+    }
+
+    /**
+     * Touche pressée, à partir de l'événement Minecraft complet. Forme recommandée : elle tient
+     * compte de la disposition du clavier pour les lettres, donc des raccourcis (Ctrl+A, Ctrl+Z…)
+     * et de {@code event.keyCode} côté page.
+     */
+    public void keyPressed(KeyEvent event) {
+        UltralightEngine.checkRenderThread("keyPressed");
+        forcePaint = REPAINT_AFTER_INPUT;
+        fireKey(KeyEventType.RAW_KEY_DOWN, event.key(), event.keycode(), event.modifiers());
+    }
+
+    public void keyReleased(KeyEvent event) {
+        UltralightEngine.checkRenderThread("keyReleased");
+        forcePaint = REPAINT_AFTER_INPUT;
+        fireKey(KeyEventType.KEY_UP, event.key(), event.keycode(), event.modifiers());
     }
 
     /**
@@ -308,13 +350,32 @@ public final class UltralightBrowserView {
      */
     public void requestRepaint() { forcePaint = REPAINT_AFTER_INPUT; }
 
-    public void focus()   { try { view.focus();   } catch (Throwable ignored) {} }
-    public void unfocus() { try { view.unfocus(); } catch (Throwable ignored) {} }
+    /** Repeindre à chaque frame : voir {@link #setAnimated(boolean)}. */
+    private volatile boolean animated = false;
+
+    /**
+     * Page animée (CSS, {@code requestAnimationFrame}, vidéo…) : la vue est repeinte à chaque
+     * frame. Sans ce réglage, Ultralight ne repeint qu'après une entrée ou à son battement lent, et
+     * une animation sans interaction se fige à l'écran. Coût : la re-rastérisation permanente
+     * (voir docs/API.md, performance). Inutile pour une page statique.
+     */
+    public void setAnimated(boolean animated) { this.animated = animated; }
+    public boolean isAnimated()               { return animated; }
+
+    public void focus() {
+        UltralightEngine.checkRenderThread("focus");
+        try { view.focus(); } catch (Throwable ignored) {}
+    }
+
+    public void unfocus() {
+        UltralightEngine.checkRenderThread("unfocus");
+        try { view.unfocus(); } catch (Throwable ignored) {}
+    }
     public boolean hasInputFocus() { try { return view.hasInputFocus(); } catch (Throwable t) { return false; } }
 
-    private void fireKey(KeyEventType type, int mcKey, int mcModifiers) {
+    private void fireKey(KeyEventType type, int mcKey, int sdlKeycode, int mcModifiers) {
         try (ULKeyEvent e = new ULKeyEvent(type, mapModifiers(mcModifiers),
-                mcKeyToWindowsVK(mcKey), 0, "", "", false, false, false)) {
+                toWindowsVK(mcKey, sdlKeycode), 0, "", "", isKeypad(mcKey), false, false)) {
             view.fireKeyEvent(e);
         } catch (Throwable t) { inputFailed("clavier", t); }
     }
@@ -350,10 +411,38 @@ public final class UltralightBrowserView {
      * faut donc une vraie table. Une touche inconnue renvoie 0 : Ultralight l'ignore, ce qui vaut
      * mieux que d'envoyer un VK arbitraire.
      */
-    private static int mcKeyToWindowsVK(int mcKey) {
+    static int toWindowsVK(int mcKey, int sdlKeycode) {
+        // Lettres : le keycode SDL suit la disposition du clavier ('a'..'z' pour la touche qui
+        // PORTE cette lettre), comme les VK Windows. La position physique, elle, ferait d'un A
+        // AZERTY un Q. Chiffres et ponctuation restent sur la position : c'est aussi ce que fait
+        // Windows (la rangée du haut d'un AZERTY donne VK_1..VK_9, pas '&', 'é'...).
+        if (sdlKeycode >= 'a' && sdlKeycode <= 'z') return 0x41 + (sdlKeycode - 'a');
+        return mcKeyToWindowsVK(mcKey);
+    }
+
+    /** Pavé numérique : absents des constantes d'InputConstants, scancodes SDL stables. */
+    private static final int SDL_KP_DIVIDE = 84, SDL_KP_MINUS = 86, SDL_KP_PERIOD = 99;
+
+    private static boolean isKeypad(int mcKey) {
+        return (mcKey >= InputConstants.KEY_NUMPAD1 && mcKey <= InputConstants.KEY_NUMPAD9)
+                || mcKey == InputConstants.KEY_NUMPAD0 || mcKey == InputConstants.KEY_NUMPADENTER
+                || mcKey == InputConstants.KEY_MULTIPLY || mcKey == InputConstants.KEY_ADD
+                || mcKey == SDL_KP_DIVIDE || mcKey == SDL_KP_MINUS || mcKey == SDL_KP_PERIOD;
+    }
+
+    static int mcKeyToWindowsVK(int mcKey) {
         // Lettres et chiffres : plages contigues cote SDL, on translate.
         if (mcKey >= InputConstants.KEY_A && mcKey <= InputConstants.KEY_Z) {
             return 0x41 + (mcKey - InputConstants.KEY_A);          // 'A'..'Z'
+        }
+        if (mcKey >= InputConstants.KEY_F1 && mcKey <= InputConstants.KEY_F12) {
+            return 0x70 + (mcKey - InputConstants.KEY_F1);         // VK_F1..VK_F12
+        }
+        if (mcKey >= InputConstants.KEY_F13 && mcKey <= InputConstants.KEY_F24) {
+            return 0x7C + (mcKey - InputConstants.KEY_F13);        // VK_F13..VK_F24
+        }
+        if (mcKey >= InputConstants.KEY_NUMPAD1 && mcKey <= InputConstants.KEY_NUMPAD9) {
+            return 0x61 + (mcKey - InputConstants.KEY_NUMPAD1);    // VK_NUMPAD1..9
         }
         if (mcKey >= InputConstants.KEY_1 && mcKey <= InputConstants.KEY_9) {
             return 0x31 + (mcKey - InputConstants.KEY_1);          // '1'..'9'
@@ -377,6 +466,39 @@ public final class UltralightBrowserView {
             case InputConstants.KEY_DOWN        -> 0x28;
             case InputConstants.KEY_INSERT      -> 0x2D;
             case InputConstants.KEY_DELETE      -> 0x2E;
+            // Pavé numérique (le 0 suit le 9 cote SDL, comme la rangée du haut).
+            case InputConstants.KEY_NUMPAD0     -> 0x60;
+            case InputConstants.KEY_MULTIPLY    -> 0x6A;
+            case InputConstants.KEY_ADD         -> 0x6B;
+            case SDL_KP_MINUS                   -> 0x6D;
+            case SDL_KP_PERIOD                  -> 0x6E;
+            case SDL_KP_DIVIDE                  -> 0x6F;
+            // Ponctuation (VK_OEM_*, positions US comme sous Windows).
+            case InputConstants.KEY_SEMICOLON   -> 0xBA;
+            case InputConstants.KEY_EQUALS      -> 0xBB;
+            case InputConstants.KEY_COMMA       -> 0xBC;
+            case InputConstants.KEY_MINUS       -> 0xBD;
+            case InputConstants.KEY_PERIOD      -> 0xBE;
+            case InputConstants.KEY_SLASH       -> 0xBF;
+            case InputConstants.KEY_GRAVE       -> 0xC0;
+            case InputConstants.KEY_LBRACKET    -> 0xDB;
+            case InputConstants.KEY_BACKSLASH   -> 0xDC;
+            case InputConstants.KEY_RBRACKET    -> 0xDD;
+            case InputConstants.KEY_APOSTROPHE  -> 0xDE;
+            // Modificateurs seuls : WebKit attend les VK génériques, pas gauche/droite.
+            case InputConstants.KEY_LSHIFT,
+                 InputConstants.KEY_RSHIFT      -> 0x10;
+            case InputConstants.KEY_LCONTROL,
+                 InputConstants.KEY_RCONTROL    -> 0x11;
+            case InputConstants.KEY_LALT,
+                 InputConstants.KEY_RALT        -> 0x12;
+            case InputConstants.KEY_LGUI        -> 0x5B;
+            case InputConstants.KEY_RGUI        -> 0x5C;
+            case InputConstants.KEY_CAPSLOCK    -> 0x14;
+            case InputConstants.KEY_PAUSE       -> 0x13;
+            case InputConstants.KEY_PRINTSCREEN -> 0x2C;
+            case InputConstants.KEY_NUMLOCK     -> 0x90;
+            case InputConstants.KEY_SCROLLLOCK  -> 0x91;
             default                             -> 0;
         };
     }
@@ -391,7 +513,7 @@ public final class UltralightBrowserView {
      * en retard de ~1 s (alors qu'un drag, qui invalide en continu, reste fluide).
      */
     void prepareFrame() {
-        if (forcePaint > 0) {
+        if (forcePaint > 0 || animated) {
             try { view.setNeedsPaint(true); } catch (Throwable ignored) {}
         }
     }
@@ -482,6 +604,7 @@ public final class UltralightBrowserView {
             if (full) mcTexture.upload();      // 1er paint / resize : upload plein (cree aussi la GpuTexture)
             else      uploadBand(dy, dh, w);   // sinon : seulement la bande sale
             textureReady = true;
+            paintCount++;
             if (full && DUMP_TEXTURE) dumpTexture(w, h, srcStride, surface.getRowBytes() / 4);
         } catch (Throwable t) {
             // Un echec de peinture durable se traduit par un ecran vide. En debug seul, personne ne
@@ -624,6 +747,9 @@ public final class UltralightBrowserView {
         }
     }
 
+    /** Frames ou la texture a effectivement ete mise a jour (lu par la sonde). */
+    int paintCount = 0;
+
     /** Refus de taille deja signale. */
     private boolean textureTooLargeWarned = false;
 
@@ -703,6 +829,7 @@ public final class UltralightBrowserView {
      * et du console capture) et renvoie le résultat en chaîne. Outil de diagnostic réutilisable.
      */
     public String evalString(String js) {
+        UltralightEngine.checkRenderThread("evalString");
         try (JSContext ctx = view.acquireJSContextLock()) {
             JSValue r = ctx.evaluate(js);
             return r == null ? null : r.toString();

@@ -1,6 +1,7 @@
 package net.ostore.ultralight;
 
 import me.ayydxn.luminescence.config.ULConfig;
+import me.ayydxn.luminescence.platform.ULLogger;
 import me.ayydxn.luminescence.platform.ULPlatform;
 import me.ayydxn.luminescence.platform.impl.StandardULFileSystem;
 import me.ayydxn.luminescence.renderer.ULRenderer;
@@ -8,6 +9,7 @@ import me.ayydxn.luminescence.view.ULView;
 import me.ayydxn.luminescence.view.ULViewConfig;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +38,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class UltralightEngine {
 
     private static final Logger LOG = LoggerFactory.getLogger("ultralight/engine");
+    /** Messages internes d'Ultralight (chargements ratés, erreurs du moteur). */
+    private static final Logger NATIVE_LOG = LoggerFactory.getLogger("ultralight/native");
 
     private static volatile boolean ready = false;
     private static boolean initAttempted = false;
@@ -121,6 +125,19 @@ public final class UltralightEngine {
     public static boolean isReady() { return ready; }
 
     /**
+     * Refuse tout appel venu d'un autre thread que le render thread. Le binding JNI n'est pas
+     * thread-safe : un appel d'ailleurs corrompt la mémoire native, et le crash qui s'ensuit, plus
+     * tard et ailleurs, ne dit rien de sa cause. Une exception immédiate, si.
+     */
+    static void checkRenderThread(String what) {
+        if (!RenderSystem.isOnRenderThread()) {
+            throw new IllegalStateException("Ultralight : " + what + " appelé depuis le thread « "
+                    + Thread.currentThread().getName() + " ». Toute l'API doit être appelée depuis "
+                    + "le render thread (Minecraft.getInstance().execute(...) pour y revenir).");
+        }
+    }
+
+    /**
      * Enregistre le pilote de frame. L'initialisation native réelle (plateforme + renderer) est
      * <b>différée au premier frame</b> : pendant {@code onInitializeClient}, la fenêtre/GL de MC
      * n'existe pas encore et créer le renderer Ultralight 1.4 y plante (ACCESS_VIOLATION).
@@ -187,6 +204,20 @@ public final class UltralightEngine {
                 LOG.info("[ul] Police de secours emoji désactivée (-Dultralight.emojifallback=false) → loader standard.");
             }
             ULPlatform.setFileSystem(new StandardULFileSystem());
+            // Sans presse-papiers, Ctrl+C / Ctrl+V dans une page ne font rien.
+            ULPlatform.setClipboard(new UltralightClipboard());
+            // Sans logger, les erreurs internes du moteur n'arrivent nulle part. Le rappel peut
+            // venir d'un thread de travail d'Ultralight : Luminescence y rattache le thread à la
+            // JVM, et SLF4J est thread-safe. Aucune exception ne doit remonter vers le natif.
+            ULPlatform.setLogger((level, message) -> {
+                try {
+                    switch (level) {
+                        case ERROR   -> NATIVE_LOG.error("[ul-native] {}", message);
+                        case WARNING -> NATIVE_LOG.warn("[ul-native] {}", message);
+                        default      -> NATIVE_LOG.debug("[ul-native] {}", message);
+                    }
+                } catch (Throwable ignored) { }
+            });
 
             try (ULConfig config = new ULConfig()) {
                 // resourcePathPrefix est préfixé DIRECTEMENT aux noms de ressources (icudt67l.dat,

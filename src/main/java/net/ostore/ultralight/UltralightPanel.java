@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.Window;
 import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.platform.cursor.CursorType;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
@@ -83,6 +84,7 @@ public final class UltralightPanel implements AutoCloseable {
     private final long maxViewPixels;
     private final float boundsX, boundsY, boundsW, boundsH;
     private final String bridgeName;   // null = défaut de la bibliothèque
+    private boolean animated;          // repeindre à chaque frame (page animée)
 
     // ── état géométrique courant ──
     private UltralightBrowserView view;
@@ -121,6 +123,7 @@ public final class UltralightPanel implements AutoCloseable {
         this.boundsW       = b.boundsW;
         this.boundsH       = b.boundsH;
         this.bridgeName    = b.bridgeName;
+        this.animated      = b.animated;
     }
 
     public static Builder builder() { return new Builder(); }
@@ -132,6 +135,7 @@ public final class UltralightPanel implements AutoCloseable {
         private long maxViewPixels = 3840L * 2160L;
         private float boundsX = 0f, boundsY = 0f, boundsW = 1f, boundsH = 1f;
         private String bridgeName = null;
+        private boolean animated = false;
 
         /** Viewport CSS pour lequel la page est écrite. Défaut 1280×720. */
         public Builder design(int cssWidth, int cssHeight) {
@@ -183,6 +187,13 @@ public final class UltralightPanel implements AutoCloseable {
          * nom global se cassent mutuellement le pont.
          */
         public Builder bridgeName(String name) { this.bridgeName = name; return this; }
+
+        /**
+         * Page animée (CSS, {@code requestAnimationFrame}, vidéo) : repeinte à chaque frame. Sans
+         * ce réglage, une animation sans interaction se fige à l'écran. Inutile, et coûteux, pour
+         * une page statique.
+         */
+        public Builder animated(boolean animated) { this.animated = animated; return this; }
 
         public UltralightPanel build() { return new UltralightPanel(this); }
     }
@@ -380,6 +391,7 @@ public final class UltralightPanel implements AutoCloseable {
         viewPW = pw; viewPH = ph; deviceScale = scale;
         view = new UltralightBrowserView(pw, ph, scale);
         if (bridgeName    != null) view.setBridgeName(bridgeName);
+        view.setAnimated(animated);
         if (queryHandler  != null) view.setQueryHandler(queryHandler);
         if (cursorHandler != null) view.setCursorHandler(cursorHandler);
         view.setOnPageReadyCallback(wrapPageReady(pageReadyCallback));
@@ -514,6 +526,22 @@ public final class UltralightPanel implements AutoCloseable {
         return true;
     }
 
+    /**
+     * Forme recommandée depuis {@code Screen.keyPressed(KeyEvent)} : elle tient compte de la
+     * disposition du clavier (en AZERTY, la forme à codes entiers envoie Ctrl+Q pour Ctrl+A).
+     */
+    public boolean keyPressed(KeyEvent event) {
+        if (view == null) return false;
+        view.keyPressed(event);
+        return true;
+    }
+
+    public boolean keyReleased(KeyEvent event) {
+        if (view == null) return false;
+        view.keyReleased(event);
+        return true;
+    }
+
     public boolean charTyped(String text) {
         if (view == null) return false;
         view.charTyped(text);
@@ -524,8 +552,17 @@ public final class UltralightPanel implements AutoCloseable {
     public void unfocus() { if (view != null) view.unfocus(); }
     public boolean hasInputFocus() { return view != null && view.hasInputFocus(); }
 
-    /** Force la re-rastérisation : à appeler chaque frame pour un overlay animé sans input. */
+    /** Force la re-rastérisation pendant quelques frames. Pour une page animée, préférer
+     *  {@link #setAnimated(boolean)} plutôt que de l'appeler à chaque frame. */
     public void requestRepaint() { if (view != null) view.requestRepaint(); }
+
+    /** Voir {@link Builder#animated(boolean)}. Modifiable à chaud (animation qui démarre, s'arrête). */
+    public void setAnimated(boolean animated) {
+        this.animated = animated;
+        if (view != null) view.setAnimated(animated);
+    }
+
+    public boolean isAnimated() { return animated; }
 
     @Override
     public void close() {
