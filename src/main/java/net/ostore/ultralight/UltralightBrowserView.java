@@ -22,6 +22,7 @@ import me.ayydxn.luminescence.view.ULViewListener;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTexture;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.input.KeyEvent;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.Identifier;
@@ -120,6 +121,7 @@ public final class UltralightBrowserView {
      *         une exception claire. {@link UltralightPanel} gère cette attente tout seul.
      */
     public UltralightBrowserView(int width, int height, double deviceScale) {
+        UltralightEngine.checkRenderThread("new UltralightBrowserView");
         if (!UltralightEngine.isReady()) {
             throw new IllegalStateException(
                     "UltralightEngine n'est pas prêt : l'init native est différée au 1er frame rendu. "
@@ -144,8 +146,15 @@ public final class UltralightBrowserView {
     //  API publique — render thread
     // =========================================================================
 
-    public void loadHTML(String html) { pageReady.set(false); view.loadHTML(sanitizeForLoad(html)); }
-    public void loadURL(String url)   { pageReady.set(false); view.loadURL(url); }
+    public void loadHTML(String html) {
+        UltralightEngine.checkRenderThread("loadHTML");
+        pageReady.set(false); bridgeSignaled = true; view.loadHTML(sanitizeForLoad(html));
+    }
+
+    public void loadURL(String url) {
+        UltralightEngine.checkRenderThread("loadURL");
+        pageReady.set(false); bridgeSignaled = true; view.loadURL(url);
+    }
 
     /**
      * Convertit les caractères hors du plan multilingue de base (BMP) — c.-à-d. les paires de
@@ -178,10 +187,15 @@ public final class UltralightBrowserView {
      * {@code UltralightPanel} se charge (redimensionnement temporisé).
      */
     public void resize(int physicalWidth, int physicalHeight) {
+        UltralightEngine.checkRenderThread("resize");
         if (physicalWidth <= 0 || physicalHeight <= 0) return;   // fenêtre minimisée
         if (physicalWidth == texW && physicalHeight == texH && mcTexture != null) return;
         view.resize(physicalWidth, physicalHeight);
-        destroyMcTexture();
+        // Libération immédiate ici, et elle est sûre : UltralightPanel redimensionne AVANT de
+        // dessiner et ne dessine rien tant que la nouvelle texture n'est pas prête. La reporter
+        // serait même faux : la nouvelle texture reprend le même identifiant, et une libération
+        // différée par identifiant emporterait la nouvelle.
+        destroyMcTexture(false);
         needsFullUpload = true;
         textureReady    = false;
         // Sans ça, Ultralight ne re-rastérise que ce qu'il juge sale : sur la surface fraîchement
@@ -195,6 +209,7 @@ public final class UltralightBrowserView {
     }
 
     public void executeJavaScript(String script) {
+        UltralightEngine.checkRenderThread("executeJavaScript");
         try { view.evaluateScript(script, new String[1]); }
         catch (Throwable e) { LOG.debug("[ul-view:{}] JS error: {}", viewId, e.getMessage()); }
     }
@@ -217,8 +232,9 @@ public final class UltralightBrowserView {
     public ULView getView() { return view; }
 
     public void close() {
+        UltralightEngine.checkRenderThread("close");
         UltralightEngine.unregisterView(this);
-        destroyMcTexture();
+        destroyMcTexture(true);
         textureReady = false;
         pageReady.set(false);
         try { view.destroy(); } catch (Throwable ignored) {}
@@ -230,49 +246,91 @@ public final class UltralightBrowserView {
     // =========================================================================
 
     public void mouseMoved(int x, int y) {
+        UltralightEngine.checkRenderThread("mouseMoved");
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_MOVED, x, y, MouseButton.NONE)) {
             view.fireMouseEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("souris", t); }
     }
 
     public void mousePressed(int x, int y, int glfwButton) {
+        UltralightEngine.checkRenderThread("mousePressed");
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_DOWN, x, y, mapButton(glfwButton))) {
             view.fireMouseEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("souris", t); }
     }
 
     public void mouseReleased(int x, int y, int glfwButton) {
+        UltralightEngine.checkRenderThread("mouseReleased");
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULMouseEvent e = new ULMouseEvent(MouseEventType.MOUSE_UP, x, y, mapButton(glfwButton))) {
             view.fireMouseEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] mouse: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("souris", t); }
     }
 
     public void scroll(int deltaXpixels, int deltaYpixels) {
+        UltralightEngine.checkRenderThread("scroll");
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULScrollEvent e = new ULScrollEvent(ScrollEventType.SCROLL_BY_PIXEL, deltaXpixels, deltaYpixels)) {
             view.fireScrollEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] scroll: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("molette", t); }
     }
 
     public void charTyped(String text) {
+        UltralightEngine.checkRenderThread("charTyped");
         if (text == null || text.isEmpty()) return;
         forcePaint = REPAINT_AFTER_INPUT;
         try (ULKeyEvent e = new ULKeyEvent(KeyEventType.CHAR, 0, 0, 0, text, text, false, false, false)) {
             view.fireKeyEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] char: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("texte", t); }
     }
 
+    /** Echec d'input deja signale : une page qui ne recoit plus rien doit se voir sans debug. */
+    private boolean inputFailureWarned = false;
+
+    private void inputFailed(String kind, Throwable t) {
+        if (!inputFailureWarned) {
+            inputFailureWarned = true;
+            LOG.warn("[ul-view:{}] echec d'envoi d'un evenement ({}) a la page, signale une seule fois : {}",
+                    viewId, kind, t.toString());
+        }
+        LOG.debug("[ul-view:{}] {} : {}", viewId, kind, t.getMessage());
+    }
+
+    /**
+     * Touche pressée, codes tels que Minecraft les fournit ({@code KeyEvent.key()}, code GLFW de
+     * la position physique, nommé d'après le clavier US). Préférer {@link #keyPressed(KeyEvent)} :
+     * cette forme ne connaît pas la disposition du clavier, donc en AZERTY la touche A arrive à la
+     * page comme un Q (Ctrl+A devient Ctrl+Q, Ctrl+Z devient Ctrl+W).
+     */
     public void keyPressed(int glfwKey, int glfwModifiers) {
+        UltralightEngine.checkRenderThread("keyPressed");
         forcePaint = REPAINT_AFTER_INPUT;
-        fireKey(KeyEventType.RAW_KEY_DOWN, glfwKey, glfwModifiers);
+        fireKey(KeyEventType.RAW_KEY_DOWN, glfwKey, null, glfwModifiers);
     }
 
     public void keyReleased(int glfwKey, int glfwModifiers) {
+        UltralightEngine.checkRenderThread("keyReleased");
         forcePaint = REPAINT_AFTER_INPUT;
-        fireKey(KeyEventType.KEY_UP, glfwKey, glfwModifiers);
+        fireKey(KeyEventType.KEY_UP, glfwKey, null, glfwModifiers);
+    }
+
+    /**
+     * Touche pressée, à partir de l'événement Minecraft complet. Forme recommandée : elle tient
+     * compte de la disposition du clavier pour les lettres, donc des raccourcis (Ctrl+A, Ctrl+Z…)
+     * et de {@code event.keyCode} côté page.
+     */
+    public void keyPressed(KeyEvent event) {
+        UltralightEngine.checkRenderThread("keyPressed");
+        forcePaint = REPAINT_AFTER_INPUT;
+        fireKey(KeyEventType.RAW_KEY_DOWN, event.key(), layoutKeyName(event), event.modifiers());
+    }
+
+    public void keyReleased(KeyEvent event) {
+        UltralightEngine.checkRenderThread("keyReleased");
+        forcePaint = REPAINT_AFTER_INPUT;
+        fireKey(KeyEventType.KEY_UP, event.key(), layoutKeyName(event), event.modifiers());
     }
 
     /**
@@ -283,15 +341,34 @@ public final class UltralightBrowserView {
      */
     public void requestRepaint() { forcePaint = REPAINT_AFTER_INPUT; }
 
-    public void focus()   { try { view.focus();   } catch (Throwable ignored) {} }
-    public void unfocus() { try { view.unfocus(); } catch (Throwable ignored) {} }
+    /** Repeindre à chaque frame : voir {@link #setAnimated(boolean)}. */
+    private volatile boolean animated = false;
+
+    /**
+     * Page animée (CSS, {@code requestAnimationFrame}, vidéo…) : la vue est repeinte à chaque
+     * frame. Sans ce réglage, Ultralight ne repeint qu'après une entrée ou à son battement lent, et
+     * une animation sans interaction se fige à l'écran. Coût : la re-rastérisation permanente
+     * (voir docs/API.md, performance). Inutile pour une page statique.
+     */
+    public void setAnimated(boolean animated) { this.animated = animated; }
+    public boolean isAnimated()               { return animated; }
+
+    public void focus() {
+        UltralightEngine.checkRenderThread("focus");
+        try { view.focus(); } catch (Throwable ignored) {}
+    }
+
+    public void unfocus() {
+        UltralightEngine.checkRenderThread("unfocus");
+        try { view.unfocus(); } catch (Throwable ignored) {}
+    }
     public boolean hasInputFocus() { try { return view.hasInputFocus(); } catch (Throwable t) { return false; } }
 
-    private void fireKey(KeyEventType type, int glfwKey, int glfwModifiers) {
+    private void fireKey(KeyEventType type, int glfwKey, String layoutName, int glfwModifiers) {
         try (ULKeyEvent e = new ULKeyEvent(type, mapModifiers(glfwModifiers),
-                glfwKeyToWindowsVK(glfwKey), 0, "", "", false, false, false)) {
+                toWindowsVK(glfwKey, layoutName), 0, "", "", isKeypad(glfwKey), false, false)) {
             view.fireKeyEvent(e);
-        } catch (Throwable t) { LOG.debug("[ul-view:{}] key: {}", viewId, t.getMessage()); }
+        } catch (Throwable t) { inputFailed("clavier", t); }
     }
 
     private static MouseButton mapButton(int glfwButton) {
@@ -312,25 +389,107 @@ public final class UltralightBrowserView {
         return m;
     }
 
-    /** GLFW → virtual key code Windows (A-Z/0-9 coïncident ; touches d'édition remappées). */
-    private static int glfwKeyToWindowsVK(int glfwKey) {
+    /**
+     * Nom que la disposition ACTIVE donne à la touche ("a" pour la touche qui porte un A, où
+     * qu'elle soit), ou null. En 26.2 le {@code KeyEvent} ne transporte que la position physique
+     * (code GLFW) et le scancode : c'est GLFW qui sait traduire, Minecraft ne le fait pas. Appel
+     * natif, mais seulement à la frappe, et sur le thread principal comme GLFW l'exige.
+     */
+    private static String layoutKeyName(KeyEvent event) {
+        try { return GLFW.glfwGetKeyName(event.key(), event.scancode()); }
+        catch (Throwable t) { return null; }
+    }
+
+    /**
+     * Touche GLFW vers virtual key code Windows, ce qu'attend Ultralight.
+     *
+     * <p>{@code layoutName} vient de {@code glfwGetKeyName} (null pour la forme à codes entiers).
+     * Lettres : on suit la disposition, comme les VK Windows, sinon un A AZERTY partirait en Q.
+     * Chiffres et ponctuation restent sur la position : c'est aussi ce que fait Windows (la rangée
+     * du haut d'un AZERTY donne VK_1..VK_9, pas '&', 'é'...).
+     */
+    static int toWindowsVK(int glfwKey, String layoutName) {
+        if (layoutName != null && layoutName.length() == 1) {
+            char c = Character.toLowerCase(layoutName.charAt(0));
+            if (c >= 'a' && c <= 'z') return 0x41 + (c - 'a');
+        }
+        return glfwKeyToWindowsVK(glfwKey);
+    }
+
+    private static boolean isKeypad(int glfwKey) {
+        return glfwKey >= GLFW.GLFW_KEY_KP_0 && glfwKey <= GLFW.GLFW_KEY_KP_EQUAL;
+    }
+
+    /**
+     * Position physique GLFW vers VK. Une touche inconnue renvoie 0 : Ultralight l'ignore, ce qui
+     * vaut mieux que d'envoyer un VK arbitraire (la 2.0 renvoyait le code GLFW tel quel, et F1,
+     * qui vaut 290, n'avait aucun sens pour la page).
+     */
+    static int glfwKeyToWindowsVK(int glfwKey) {
+        // A-Z et 0-9 : GLFW s'aligne sur l'ASCII, donc sur les VK.
+        if (glfwKey >= GLFW.GLFW_KEY_A && glfwKey <= GLFW.GLFW_KEY_Z) return glfwKey;
+        if (glfwKey >= GLFW.GLFW_KEY_0 && glfwKey <= GLFW.GLFW_KEY_9) return glfwKey;
+        // F1..F24 contigus des deux côtés (VK_F1 = 0x70 .. VK_F24 = 0x87). F25 n'a pas de VK.
+        if (glfwKey >= GLFW.GLFW_KEY_F1 && glfwKey <= GLFW.GLFW_KEY_F24) {
+            return 0x70 + (glfwKey - GLFW.GLFW_KEY_F1);
+        }
+        if (glfwKey >= GLFW.GLFW_KEY_KP_0 && glfwKey <= GLFW.GLFW_KEY_KP_9) {
+            return 0x60 + (glfwKey - GLFW.GLFW_KEY_KP_0);                 // VK_NUMPAD0..9
+        }
+
         return switch (glfwKey) {
-            case GLFW.GLFW_KEY_BACKSPACE -> 0x08;
-            case GLFW.GLFW_KEY_TAB       -> 0x09;
-            case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> 0x0D;
-            case GLFW.GLFW_KEY_ESCAPE    -> 0x1B;
-            case GLFW.GLFW_KEY_SPACE     -> 0x20;
-            case GLFW.GLFW_KEY_PAGE_UP   -> 0x21;
-            case GLFW.GLFW_KEY_PAGE_DOWN -> 0x22;
-            case GLFW.GLFW_KEY_END       -> 0x23;
-            case GLFW.GLFW_KEY_HOME      -> 0x24;
-            case GLFW.GLFW_KEY_LEFT      -> 0x25;
-            case GLFW.GLFW_KEY_UP        -> 0x26;
-            case GLFW.GLFW_KEY_RIGHT     -> 0x27;
-            case GLFW.GLFW_KEY_DOWN      -> 0x28;
-            case GLFW.GLFW_KEY_INSERT    -> 0x2D;
-            case GLFW.GLFW_KEY_DELETE    -> 0x2E;
-            default                      -> glfwKey; // A-Z, 0-9 alignés sur les VK
+            case GLFW.GLFW_KEY_BACKSPACE     -> 0x08;
+            case GLFW.GLFW_KEY_TAB           -> 0x09;
+            case GLFW.GLFW_KEY_ENTER,
+                 GLFW.GLFW_KEY_KP_ENTER      -> 0x0D;
+            case GLFW.GLFW_KEY_ESCAPE        -> 0x1B;
+            case GLFW.GLFW_KEY_SPACE         -> 0x20;
+            case GLFW.GLFW_KEY_PAGE_UP       -> 0x21;
+            case GLFW.GLFW_KEY_PAGE_DOWN     -> 0x22;
+            case GLFW.GLFW_KEY_END           -> 0x23;
+            case GLFW.GLFW_KEY_HOME          -> 0x24;
+            case GLFW.GLFW_KEY_LEFT          -> 0x25;
+            case GLFW.GLFW_KEY_UP            -> 0x26;
+            case GLFW.GLFW_KEY_RIGHT         -> 0x27;
+            case GLFW.GLFW_KEY_DOWN          -> 0x28;
+            case GLFW.GLFW_KEY_INSERT        -> 0x2D;
+            case GLFW.GLFW_KEY_DELETE        -> 0x2E;
+            // Pavé numérique, opérateurs.
+            case GLFW.GLFW_KEY_KP_MULTIPLY   -> 0x6A;
+            case GLFW.GLFW_KEY_KP_ADD        -> 0x6B;
+            case GLFW.GLFW_KEY_KP_SUBTRACT   -> 0x6D;
+            case GLFW.GLFW_KEY_KP_DECIMAL    -> 0x6E;
+            case GLFW.GLFW_KEY_KP_DIVIDE     -> 0x6F;
+            // Ponctuation (VK_OEM_*, positions US comme sous Windows).
+            case GLFW.GLFW_KEY_SEMICOLON     -> 0xBA;
+            case GLFW.GLFW_KEY_EQUAL         -> 0xBB;
+            case GLFW.GLFW_KEY_COMMA         -> 0xBC;
+            case GLFW.GLFW_KEY_MINUS         -> 0xBD;
+            case GLFW.GLFW_KEY_PERIOD        -> 0xBE;
+            case GLFW.GLFW_KEY_SLASH         -> 0xBF;
+            case GLFW.GLFW_KEY_GRAVE_ACCENT  -> 0xC0;
+            case GLFW.GLFW_KEY_LEFT_BRACKET  -> 0xDB;
+            case GLFW.GLFW_KEY_BACKSLASH     -> 0xDC;
+            case GLFW.GLFW_KEY_RIGHT_BRACKET -> 0xDD;
+            case GLFW.GLFW_KEY_APOSTROPHE    -> 0xDE;
+            // Touche < > des claviers ISO (AZERTY compris) : VK_OEM_102.
+            case GLFW.GLFW_KEY_WORLD_1       -> 0xE2;
+            // Modificateurs seuls : WebKit attend les VK génériques, pas gauche/droite.
+            case GLFW.GLFW_KEY_LEFT_SHIFT,
+                 GLFW.GLFW_KEY_RIGHT_SHIFT   -> 0x10;
+            case GLFW.GLFW_KEY_LEFT_CONTROL,
+                 GLFW.GLFW_KEY_RIGHT_CONTROL -> 0x11;
+            case GLFW.GLFW_KEY_LEFT_ALT,
+                 GLFW.GLFW_KEY_RIGHT_ALT     -> 0x12;
+            case GLFW.GLFW_KEY_LEFT_SUPER    -> 0x5B;
+            case GLFW.GLFW_KEY_RIGHT_SUPER   -> 0x5C;
+            case GLFW.GLFW_KEY_MENU          -> 0x5D;
+            case GLFW.GLFW_KEY_CAPS_LOCK     -> 0x14;
+            case GLFW.GLFW_KEY_PAUSE         -> 0x13;
+            case GLFW.GLFW_KEY_PRINT_SCREEN  -> 0x2C;
+            case GLFW.GLFW_KEY_NUM_LOCK      -> 0x90;
+            case GLFW.GLFW_KEY_SCROLL_LOCK   -> 0x91;
+            default                          -> 0;
         };
     }
 
@@ -344,12 +503,21 @@ public final class UltralightBrowserView {
      * en retard de ~1 s (alors qu'un drag, qui invalide en continu, reste fluide).
      */
     void prepareFrame() {
-        if (forcePaint > 0) {
+        if (forcePaint > 0 || animated) {
             try { view.setNeedsPaint(true); } catch (Throwable ignored) {}
         }
     }
 
-    void onRendererTick() { paintSurface(); drainBridge(); }
+    void onRendererTick() {
+        paintSurface();
+        if (UltralightEngine.perfEnabled) {
+            long t0 = System.nanoTime();
+            drainBridge();
+            UltralightEngine.perfBridgeNanos += System.nanoTime() - t0;
+        } else {
+            drainBridge();
+        }
+    }
 
     // =========================================================================
     //  Pipeline surface → NativeImageBackedTexture (mémoire native directe)
@@ -397,6 +565,7 @@ public final class UltralightBrowserView {
             if (full) mcTexture.upload();      // 1er paint / resize : upload plein (cree aussi la GpuTexture)
             else      uploadBand(dy, dh, w);   // sinon : seulement la bande sale
             textureReady = true;
+            paintCount++;
             if (full && DUMP_TEXTURE) dumpTexture(w, h, srcStride, surface.getRowBytes() / 4);
         } catch (Throwable t) {
             // Un echec de peinture durable se traduit par un ecran vide. En debug seul, personne ne
@@ -539,15 +708,25 @@ public final class UltralightBrowserView {
         }
     }
 
+    /** Frames ou la texture a effectivement ete mise a jour (lu par la sonde). */
+    int paintCount = 0;
+
     /** Refus de taille deja signale. */
     private boolean textureTooLargeWarned = false;
 
-    private void destroyMcTexture() {
+    /**
+     * @param deferred reporter la libération au prochain tick (fermeture de la vue) : un dessin de
+     *        la frame en cours peut encore référencer la texture. L'identifiant n'est plus jamais
+     *        réutilisé ensuite, la libération différée par identifiant est donc sans ambiguïté.
+     */
+    private void destroyMcTexture(boolean deferred) {
         Minecraft mc = Minecraft.getInstance();
         // release() ferme la texture, donc la NativeImage, donc libere notre tampon natif. Sans
         // TextureManager (arret du jeu), on ferme nous-memes : sinon le tampon fuit.
-        if (texIdentifier != null && mc != null) {
-            mc.getTextureManager().release(texIdentifier);
+        Identifier id = texIdentifier;
+        if (id != null && mc != null) {
+            if (deferred) UltralightEngine.deferRelease(() -> mc.getTextureManager().release(id));
+            else          mc.getTextureManager().release(id);
         } else if (mcTexture != null) {
             mcTexture.close();
         }
@@ -559,21 +738,44 @@ public final class UltralightBrowserView {
     }
 
     // =========================================================================
-    //  Pont JS↔Java — par FILE (drainée à chaque frame)
+    //  Pont JS↔Java : par FILE, vidée à la demande
     // =========================================================================
     // Avec Luminescence 1.4, le callback natif d'un JSFunction ne se déclenche PAS pour les
     // appels initiés par la page (seulement pour les appels Java via ctx.evaluate). On installe
-    // donc une fonction JS pure qui EMPILE les messages dans window.__ulq, et on DRAINE cette
-    // file côté Java à chaque onRendererTick via evaluate (qui, lui, fonctionne).
+    // donc une fonction JS pure qui EMPILE les messages dans window.__ulq, et on vide cette file
+    // côté Java via evaluate (qui, lui, fonctionne).
+    //
+    // Vider à chaque frame coûtait un verrou de contexte JS et une évaluation par vue et par
+    // frame, même sans le moindre message. La fonction signale donc le passage de la file de vide
+    // à non vide par un message console marqueur, que le listener console (lui fiable) intercepte :
+    // on ne vide que sur signal. Un vidage de secours tourne quand même toutes les
+    // BRIDGE_FALLBACK_FRAMES frames : il réinstalle la fonction si la page l'a perdue et rattrape
+    // un signal manqué, qu'on signale alors, car la latence du pont en souffrirait.
 
     private static final String ULQ = "__ulq";
+    /** Message console émis par la page quand la file passe de vide à non vide. */
+    private static final String BRIDGE_SIGNAL = "\u0001ulq";
+    private static final int BRIDGE_FALLBACK_FRAMES = 30;
+
+    /** La page a signalé des messages en attente (écrit par le listener console). */
+    private volatile boolean bridgeSignaled = true;
+    private int framesSinceDrain = 0;
+    /** Vidages déclenchés par le signal, et messages rattrapés par le secours (lus par la sonde). */
+    int bridgeSignalDrains = 0;
+    int bridgeFallbackCatches = 0;
+    private boolean bridgeFallbackWarned = false;
+
+    /** La fonction du pont, en JS : empile, et signale le passage de vide à non vide. */
+    private static String bridgeFunctionJs(String name) {
+        return "window['" + name + "']=function(d){var q=(window." + ULQ + "=window." + ULQ
+                + "||[]);q.push(String(d));if(q.length===1)console.log('\\u0001ulq');};";
+    }
 
     private void installBridge() {
         try (JSContext ctx = view.acquireJSContextLock()) {
             String name = bridgeName;
             ctx.evaluate(
-                "window['" + name + "']=function(d){(window." + ULQ + "=window." + ULQ
-                + "||[]).push(String(d));};window." + ULQ + "=window." + ULQ + "||[];"
+                bridgeFunctionJs(name) + "window." + ULQ + "=window." + ULQ + "||[];"
                 // Capture des erreurs JS non-catchées pour diagnostic (lisible via probe Java).
                 + "if(!window.__ulErrHook){window.__ulErrHook=1;window.addEventListener('error',function(e){"
                 + "window.__ulErr=(window.__ulErr?window.__ulErr+' | ':'')+((e&&e.message)||e)+' @'+((e&&e.filename)||'')+':'+((e&&e.lineno)||0);});}");
@@ -588,6 +790,7 @@ public final class UltralightBrowserView {
      * et du console capture) et renvoie le résultat en chaîne. Outil de diagnostic réutilisable.
      */
     public String evalString(String js) {
+        UltralightEngine.checkRenderThread("evalString");
         try (JSContext ctx = view.acquireJSContextLock()) {
             JSValue r = ctx.evaluate(js);
             return r == null ? null : r.toString();
@@ -596,21 +799,29 @@ public final class UltralightBrowserView {
         }
     }
 
-    /** Dépile window.__ulq côté Java et dispatch chaque message au handler. Appelé chaque frame. */
+    /**
+     * Dépile window.__ulq côté Java et dispatch chaque message au handler. Appelé chaque frame,
+     * mais ne touche au contexte JS que sur signal de la page, ou toutes les
+     * {@link #BRIDGE_FALLBACK_FRAMES} frames par sécurité.
+     */
     private void drainBridge() {
         Consumer<String> handler = queryHandler;
         if (handler == null) return;
+        boolean signaled = bridgeSignaled;
+        if (!signaled && ++framesSinceDrain < BRIDGE_FALLBACK_FRAMES) return;
+        bridgeSignaled = false;
+        framesSinceDrain = 0;
         String joined;
         try (JSContext ctx = view.acquireJSContextLock()) {
-            // On (ré)installe le pont dans CE contexte (le monde JS vivant de la page) à chaque
-            // frame : à onWindowObjectReady, Luminescence 1.4 fournit un contexte qui est ensuite
-            // remplacé quand la page charge, si bien que window.<bridge> posée là n'atterrit pas
-            // dans le monde de la page. Le drain, lui, tape le contexte vivant — on y garantit donc
-            // la fonction pour que ses push aillent dans le même window.__ulq que celui qu'on draine.
+            // On (ré)installe le pont dans CE contexte (le monde JS vivant de la page) : à
+            // onWindowObjectReady, Luminescence 1.4 fournit un contexte qui est ensuite remplacé
+            // quand la page charge, si bien que window.<bridge> posée là n'atterrit pas dans le
+            // monde de la page. Le drain, lui, tape le contexte vivant : on y garantit donc la
+            // fonction pour que ses push aillent dans le même window.__ulq que celui qu'on draine.
+            // Un chargement de page lève le signal, pour que cette installation suive aussitôt.
             String name = bridgeName;
             JSValue r = ctx.evaluate("(function(){"
-                + "if(typeof window['" + name + "']!=='function')window['" + name
-                + "']=function(d){(window." + ULQ + "=window." + ULQ + "||[]).push(String(d));};"
+                + "if(typeof window['" + name + "']!=='function')" + bridgeFunctionJs(name)
                 + "var q=window." + ULQ + ";if(!q||!q.length)return '';window." + ULQ
                 + "=[];return q.join('\\u0001');})()");
             joined = (r == null) ? null : r.toString();
@@ -618,7 +829,18 @@ public final class UltralightBrowserView {
             return;
         }
         if (joined == null || joined.isEmpty()) return;
-        for (String msg : joined.split("")) {
+        if (signaled) {
+            bridgeSignalDrains++;
+        } else {
+            bridgeFallbackCatches++;
+            if (!bridgeFallbackWarned) {
+                bridgeFallbackWarned = true;
+                LOG.warn("[ul-view:{}] messages du pont JS rattrapés par le vidage de secours : le "
+                        + "signal de la page n'arrive pas, la latence du pont monte à ~{} frames.",
+                        viewId, BRIDGE_FALLBACK_FRAMES);
+            }
+        }
+        for (String msg : joined.split("\u0001")) {
             if (msg.isEmpty()) continue;
             try { handler.accept(msg); }
             catch (Throwable t) { LOG.warn("[ul-view:{}] Bridge handler error: {}", viewId, t.getMessage()); }
@@ -639,6 +861,7 @@ public final class UltralightBrowserView {
         public void onDOMReady(long frameID, boolean isMainFrame, String url) {
             if (!isMainFrame) return;
             pageReady.set(true);
+            bridgeSignaled = true;   // le contexte JS vivant est là : y installer le pont sans attendre
             Consumer<Void> cb = onPageReadyCallback;
             if (cb != null) Minecraft.getInstance().execute(() -> cb.accept(null));
         }
@@ -658,6 +881,8 @@ public final class UltralightBrowserView {
         @Override
         public void onConsoleMessageAdded(ULMessageSource source, ULMessageLevel level,
                                           String message, int line, int column, String sourceID) {
+            // Signal interne du pont, pas un message de la page : on ne le logge pas.
+            if (BRIDGE_SIGNAL.equals(message)) { bridgeSignaled = true; return; }
             String tag = "[ul-console:" + viewId + "/" + source + "] " + message;
             switch (level) {
                 case ERROR   -> LOG.error(tag);

@@ -3,6 +3,7 @@ package net.ostore.ultralight;
 import com.mojang.blaze3d.platform.Window;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
@@ -82,6 +83,7 @@ public final class UltralightPanel implements AutoCloseable {
     private final long maxViewPixels;
     private final float boundsX, boundsY, boundsW, boundsH;
     private final String bridgeName;   // null = défaut de la bibliothèque
+    private boolean animated;          // repeindre à chaque frame (page animée)
 
     // ── état géométrique courant ──
     private UltralightBrowserView view;
@@ -120,6 +122,7 @@ public final class UltralightPanel implements AutoCloseable {
         this.boundsW       = b.boundsW;
         this.boundsH       = b.boundsH;
         this.bridgeName    = b.bridgeName;
+        this.animated      = b.animated;
     }
 
     public static Builder builder() { return new Builder(); }
@@ -131,6 +134,7 @@ public final class UltralightPanel implements AutoCloseable {
         private long maxViewPixels = 3840L * 2160L;
         private float boundsX = 0f, boundsY = 0f, boundsW = 1f, boundsH = 1f;
         private String bridgeName = null;
+        private boolean animated = false;
 
         /** Viewport CSS pour lequel la page est écrite. Défaut 1280×720. */
         public Builder design(int cssWidth, int cssHeight) {
@@ -182,6 +186,13 @@ public final class UltralightPanel implements AutoCloseable {
          * nom global se cassent mutuellement le pont.
          */
         public Builder bridgeName(String name) { this.bridgeName = name; return this; }
+
+        /**
+         * Page animée (CSS, {@code requestAnimationFrame}, vidéo) : repeinte à chaque frame. Sans
+         * ce réglage, une animation sans interaction se fige à l'écran. Inutile, et coûteux, pour
+         * une page statique.
+         */
+        public Builder animated(boolean animated) { this.animated = animated; return this; }
 
         public UltralightPanel build() { return new UltralightPanel(this); }
     }
@@ -319,8 +330,20 @@ public final class UltralightPanel implements AutoCloseable {
             }
         }
 
+        // Taille affichée, avant de choisir la finesse du rendu : le rectangle de dessin et la
+        // souris s'y rapportent, quelle que soit la taille de la texture.
+        double dispPW = vpw, dispPH = vph;
+
+        // Plancher d'échelle : sous un deviceScale de 1, le rendu CPU d'Ultralight 1.4 perd des
+        // couches entières (vu à 0,44 : fond et logo peints, ni texte ni blocs, jusqu'au changement
+        // suivant). On peint donc la page à sa taille CSS et la carte graphique la réduit.
+        if (scale < 1.0) {
+            vpw /= scale; vph /= scale; scale = 1.0;
+        }
+
         // Plafond de résolution : on baisse vue ET deviceScale du même facteur, le viewport CSS
-        // reste identique — seule la finesse du rendu diminue.
+        // reste identique, seule la finesse du rendu diminue. Il passe après le plancher : une page
+        // plus grande que le plafond retombe sous l'échelle 1, mieux vaut ça qu'une texture géante.
         if (maxViewPixels > 0) {
             double px = vpw * vph;
             if (px > maxViewPixels) {
@@ -334,10 +357,10 @@ public final class UltralightPanel implements AutoCloseable {
 
         // Rectangle de dessin : la vue est centrée dans sa zone, converti en px logiques.
         double pxPerGuiX = (double) fbW / guiW, pxPerGuiY = (double) fbH / guiH;
-        drawX = (int) Math.round((areaPX + (areaPW - newPW) / 2.0) / pxPerGuiX);
-        drawY = (int) Math.round((areaPY + (areaPH - newPH) / 2.0) / pxPerGuiY);
-        drawW = Math.max(1, (int) Math.round(newPW / pxPerGuiX));
-        drawH = Math.max(1, (int) Math.round(newPH / pxPerGuiY));
+        drawX = (int) Math.round((areaPX + (areaPW - dispPW) / 2.0) / pxPerGuiX);
+        drawY = (int) Math.round((areaPY + (areaPH - dispPH) / 2.0) / pxPerGuiY);
+        drawW = Math.max(1, (int) Math.round(dispPW / pxPerGuiX));
+        drawH = Math.max(1, (int) Math.round(dispPH / pxPerGuiY));
         areaW = Math.max(1, (int) Math.round(areaPW / pxPerGuiX));
         areaH = Math.max(1, (int) Math.round(areaPH / pxPerGuiY));
 
@@ -374,6 +397,7 @@ public final class UltralightPanel implements AutoCloseable {
         viewPW = pw; viewPH = ph; deviceScale = scale;
         view = new UltralightBrowserView(pw, ph, scale);
         if (bridgeName    != null) view.setBridgeName(bridgeName);
+        view.setAnimated(animated);
         if (queryHandler  != null) view.setQueryHandler(queryHandler);
         if (cursorHandler != null) view.setCursorHandler(cursorHandler);
         view.setOnPageReadyCallback(wrapPageReady(pageReadyCallback));
@@ -431,8 +455,8 @@ public final class UltralightPanel implements AutoCloseable {
         } else if (fit == Fit.FILL_CLAMPED && cssW <= minCssW) {
             note.append(" · échelle réduite (largeur CSS minimale ").append(minCssW).append(" atteinte)");
         }
-        LOG.info("[ul-panel] fit={} · vue {}×{} px · viewport CSS {}×{} · deviceScale {} (design {}×{}){}",
-                fit, viewPW, viewPH, cssW, cssH,
+        LOG.info("[ul-panel] fit={} · vue {}×{} px · affichée {}×{} · viewport CSS {}×{} · deviceScale {} (design {}×{}){}",
+                fit, viewPW, viewPH, drawW, drawH, cssW, cssH,
                 String.format(java.util.Locale.ROOT, "%.2f", deviceScale), designW, designH, note);
 
         if (fit == Fit.FILL && !warnedUnboundedFill) {
@@ -468,15 +492,21 @@ public final class UltralightPanel implements AutoCloseable {
         return true;
     }
 
-    public boolean mouseClicked(double mouseX, double mouseY, int glfwButton) {
+    /**
+     * @param mcButton le bouton tel que Minecraft le fournit ({@code MouseButtonEvent.button()}),
+     *        à comparer uniquement à {@code InputConstants.MOUSE_BUTTON_*}. En 26.2 ce sont les
+     *        codes GLFW (gauche/droit/milieu = 0/1/2) ; la 3.x pour MC 26.3 reçoit des codes SDL
+     *        (gauche/milieu/droite = 1/2/3), d'où l'intérêt de ne jamais les coder en dur.
+     */
+    public boolean mouseClicked(double mouseX, double mouseY, int mcButton) {
         if (view == null || !contains(mouseX, mouseY)) return false;
-        view.mousePressed(vx(mouseX), vy(mouseY), glfwButton);
+        view.mousePressed(vx(mouseX), vy(mouseY), mcButton);
         return true;
     }
 
-    public boolean mouseReleased(double mouseX, double mouseY, int glfwButton) {
+    public boolean mouseReleased(double mouseX, double mouseY, int mcButton) {
         if (view == null || !contains(mouseX, mouseY)) return false;
-        view.mouseReleased(vx(mouseX), vy(mouseY), glfwButton);
+        view.mouseReleased(vx(mouseX), vy(mouseY), mcButton);
         return true;
     }
 
@@ -486,15 +516,37 @@ public final class UltralightPanel implements AutoCloseable {
         return true;
     }
 
-    public boolean keyPressed(int glfwKey, int glfwModifiers) {
+    /**
+     * @param mcKey la touche telle que Minecraft la fournit ({@code KeyEvent.key()}), à transmettre
+     *        telle quelle : en 26.2 ce sont des codes GLFW de position physique (nommés d'après
+     *        le clavier US). Comparer uniquement à {@code InputConstants.KEY_*}, pas à des valeurs
+     *        en dur : la 3.x pour MC 26.3 reçoit des scancodes SDL, sans rapport.
+     */
+    public boolean keyPressed(int mcKey, int mcModifiers) {
         if (view == null) return false;
-        view.keyPressed(glfwKey, glfwModifiers);
+        view.keyPressed(mcKey, mcModifiers);
         return true;
     }
 
-    public boolean keyReleased(int glfwKey, int glfwModifiers) {
+    public boolean keyReleased(int mcKey, int mcModifiers) {
         if (view == null) return false;
-        view.keyReleased(glfwKey, glfwModifiers);
+        view.keyReleased(mcKey, mcModifiers);
+        return true;
+    }
+
+    /**
+     * Forme recommandée depuis {@code Screen.keyPressed(KeyEvent)} : elle tient compte de la
+     * disposition du clavier (en AZERTY, la forme à codes entiers envoie Ctrl+Q pour Ctrl+A).
+     */
+    public boolean keyPressed(KeyEvent event) {
+        if (view == null) return false;
+        view.keyPressed(event);
+        return true;
+    }
+
+    public boolean keyReleased(KeyEvent event) {
+        if (view == null) return false;
+        view.keyReleased(event);
         return true;
     }
 
@@ -508,8 +560,17 @@ public final class UltralightPanel implements AutoCloseable {
     public void unfocus() { if (view != null) view.unfocus(); }
     public boolean hasInputFocus() { return view != null && view.hasInputFocus(); }
 
-    /** Force la re-rastérisation : à appeler chaque frame pour un overlay animé sans input. */
+    /** Force la re-rastérisation pendant quelques frames. Pour une page animée, préférer
+     *  {@link #setAnimated(boolean)} plutôt que de l'appeler à chaque frame. */
     public void requestRepaint() { if (view != null) view.requestRepaint(); }
+
+    /** Voir {@link Builder#animated(boolean)}. Modifiable à chaud (animation qui démarre, s'arrête). */
+    public void setAnimated(boolean animated) {
+        this.animated = animated;
+        if (view != null) view.setAnimated(animated);
+    }
+
+    public boolean isAnimated() { return animated; }
 
     @Override
     public void close() {

@@ -10,6 +10,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.client.input.KeyEvent;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -62,12 +64,15 @@ final class UltralightPanelProbe {
     private static String modeOrDefault(String v) {
         if (v == null) return "all";
         String m = v.trim().toLowerCase(java.util.Locale.ROOT);
-        return (m.equals("geometry") || m.equals("input") || m.equals("perf")) ? m : "all";
+        return (m.equals("geometry") || m.equals("input") || m.equals("perf")
+                || m.equals("typing")) ? m : "all";
     }
 
     private static boolean runGeometry() { return MODE.equals("all") || MODE.equals("geometry"); }
     private static boolean runInput()    { return MODE.equals("all") || MODE.equals("input"); }
     private static boolean runPerf()     { return MODE.equals("all") || MODE.equals("perf"); }
+    /** Phase manuelle : jamais dans "all", elle attend une frappe humaine. */
+    private static boolean runTyping()   { return MODE.equals("typing"); }
 
     private static boolean flag(String property, String envName) {
         return Boolean.getBoolean(property) || "true".equalsIgnoreCase(System.getenv(envName));
@@ -87,6 +92,8 @@ final class UltralightPanelProbe {
     /** Instance unique : la réafficher conserve l'avancement de la séquence. */
     private static PanelProbeScreen instance;
     private static boolean worldRequested = false;
+    /** Demande d'appeler renderFrame() depuis le tick client (hors extraction), pour la sonde. */
+    private static volatile boolean tickRenderFrameRequested = false;
 
     private UltralightPanelProbe() {}
 
@@ -101,6 +108,10 @@ final class UltralightPanelProbe {
             if (grabRequested) {
                 grabRequested = false;
                 Screenshot.grab(mc, false);
+            }
+            if (tickRenderFrameRequested) {
+                tickRenderFrameRequested = false;
+                UltralightEngine.renderFrame();   // en jeu, hors extraction : doit etre ignore sans bruit
             }
             if (done) return;
 
@@ -170,6 +181,15 @@ final class UltralightPanelProbe {
         private final List<String> results = new ArrayList<>();
         private volatile int cursorShape = -1;
 
+        // -- verifications 3.1.0 (dans la phase input) --
+        private UltralightPanel animPanel;
+        private String savedClipboard;
+        private int animPaints0, animPaints1, animRaf0, animRaf1;
+
+        // -- phase typing (frappe reelle) --
+        private boolean typingPhase = false;
+        private String lastTyped = "";
+
         // -- phase perf --
         private boolean perfPhase = false;
         private String perfHtml;
@@ -191,6 +211,7 @@ final class UltralightPanelProbe {
         private void nextStep() {
             if (panel != null) { panel.close(); panel = null; }
             step++;
+            if (runTyping() && !typingPhase) { startTypingPhase(); return; }
             if (!runGeometry() || step >= STEPS.length) {
                 if (runInput() && !inputPhase) { startInputPhase(); return; }
                 if (runPerf()  && !perfPhase)  { startPerfPhase();  return; }
@@ -277,8 +298,57 @@ final class UltralightPanelProbe {
                 case 134 -> panel.mouseMoved(logX(350), logY(500));           // zone defilable
                 case 138 -> panel.mouseScrolled(logX(350), logY(500), 0, -3);
                 case 150 -> checkScroll();
-                case 158 -> checkSinglePump();
-                case 168 -> {
+                case 158 -> { checkSinglePump(); checkTickRenderFrame(); checkBridgeSignal(); checkDeferredReleases(); }
+                case 170 -> checkThreadGuard();
+                // Presse-papiers : Ctrl+C sur un texte selectionne, puis Ctrl+V dans un champ vide.
+                // Le contenu du presse-papiers du joueur est sauvegarde puis restaure.
+                case 172 -> {
+                    savedClipboard = Minecraft.getInstance().keyboardHandler.getClipboard();
+                    panel.executeJavaScript("var t=document.getElementById('txt');t.focus();"
+                            + "t.value='copie-ul';t.select();");
+                }
+                case 174 -> ctrl(InputConstants.KEY_C);
+                case 184 -> {
+                    String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
+                    if ("copie-ul".equals(clip)) pass("copier (Ctrl+C)", "presse-papiers = copie-ul");
+                    else                         fail("copier (Ctrl+C)", "presse-papiers = " + clip);
+                    Minecraft.getInstance().keyboardHandler.setClipboard("colle-ul");
+                    panel.executeJavaScript("var t=document.getElementById('txt');t.value='';t.focus();");
+                }
+                case 186 -> ctrl(InputConstants.KEY_V);
+                case 198 -> {
+                    String v = panel.view().evalString("document.getElementById('txt').value");
+                    if ("colle-ul".equals(v)) pass("coller (Ctrl+V)", "champ = colle-ul");
+                    else                      fail("coller (Ctrl+V)", "champ = " + v);
+                    Minecraft.getInstance().keyboardHandler.setClipboard(
+                            savedClipboard == null ? "" : savedClipboard);
+                }
+                // Touches hors lettres/chiffres, et lettre en disposition AZERTY.
+                case 200 -> { panel.keyPressed(InputConstants.KEY_F2, 0); panel.keyReleased(InputConstants.KEY_F2, 0); }
+                case 210 -> checkKeyCode("touche F2", 113);
+                case 212 -> { panel.keyPressed(InputConstants.KEY_COMMA, 0); panel.keyReleased(InputConstants.KEY_COMMA, 0); }
+                case 222 -> checkKeyCode("touche virgule", 188);
+                case 224 -> {
+                    // Position du Q QWERTY, qui porte le A en AZERTY. En 26.2 le KeyEvent ne
+                    // transporte que la position et le scancode : c'est la disposition ACTIVE du
+                    // poste qui decide de la lettre, on envoie donc un vrai evenement GLFW.
+                    KeyEvent a = new KeyEvent(InputConstants.KEY_Q,
+                            GLFW.glfwGetKeyScancode(InputConstants.KEY_Q), 0);
+                    panel.keyPressed(a);
+                    panel.keyReleased(a);
+                }
+                case 234 -> checkLayoutLetter();
+                // Animation : d'abord sans animated(), pour documenter le comportement, puis avec.
+                case 240 -> startAnimPanel();
+                case 320 -> { animPaints0 = animPaints(); animRaf0 = animRaf(); }
+                case 440 -> {
+                    animPaints1 = animPaints(); animRaf1 = animRaf();
+                    LOG.info("[ul-panelprobe] animation SANS animated() : {} frames JS, {} peintures sur 120 frames",
+                            animRaf1 - animRaf0, animPaints1 - animPaints0);
+                    animPanel.setAnimated(true);
+                }
+                case 560 -> checkAnimated();
+                case 562 -> {
                     UltralightEngine.perfEnabled = false;
                     report();
                     if (runPerf() && !perfPhase) { inputPhase = false; startPerfPhase(); }
@@ -312,6 +382,151 @@ final class UltralightPanelProbe {
             } catch (IllegalArgumentException e) {
                 pass("garde-fou nom de pont", "refuse comme prevu");
             }
+
+            // Nous sommes dans extractRenderState : c'est exactement l'appel qui produisait le
+            // damier et la vue noire. Il doit etre refuse, et le moteur ne doit pas etre pompe.
+            int refused = UltralightEngine.renderFrameRefused;
+            long pumpsBefore = UltralightEngine.perfFrameCount();
+            UltralightEngine.renderFrame();
+            if (UltralightEngine.renderFrameRefused == refused + 1
+                    && UltralightEngine.perfFrameCount() == pumpsBefore) {
+                pass("garde-fou renderFrame() pendant l'extraction", "refuse, moteur non pompe");
+            } else {
+                fail("garde-fou renderFrame() pendant l'extraction", "l'appel a ete execute");
+            }
+            renderFrameSkippedBefore = UltralightEngine.renderFrameSkipped;
+            tickRenderFrameRequested = true;   // verifie au frame 158, apres quelques ticks
+
+            // Alerte sur le nombre de vues : on en ouvre assez pour franchir le seuil.
+            int warningsBefore = UltralightEngine.viewCountWarnings;
+            List<UltralightBrowserView> extra = new ArrayList<>();
+            try {
+                for (int i = UltralightEngine.activeViews.size(); i <= UltralightEngine.VIEW_COUNT_WARN; i++) {
+                    extra.add(new UltralightBrowserView(16, 16, 1.0));
+                }
+            } finally {
+                for (UltralightBrowserView v : extra) v.close();
+            }
+            if (UltralightEngine.viewCountWarnings == warningsBefore + 1) {
+                pass("alerte nombre de vues", "emise au-dela de " + UltralightEngine.VIEW_COUNT_WARN);
+            } else {
+                fail("alerte nombre de vues", (UltralightEngine.viewCountWarnings - warningsBefore)
+                        + " alerte(s) pour " + (extra.size() + 1) + " vues");
+            }
+        }
+
+        private int renderFrameSkippedBefore;
+
+        /** renderFrame() depuis un tick client en jeu : ignore (le moteur est deja pompe). */
+        private void checkTickRenderFrame() {
+            if (UltralightEngine.renderFrameSkipped > renderFrameSkippedBefore) {
+                pass("renderFrame() en jeu hors extraction", "ignore, pas de double pompage");
+            } else {
+                fail("renderFrame() en jeu hors extraction", "non ignore (ou jamais appele)");
+            }
+        }
+
+        /**
+         * Les panneaux de la phase geometrie ont ete fermes pendant l'extraction : leurs textures
+         * doivent avoir ete liberees depuis, au tick client. Une file qui ne se vide pas serait une
+         * fuite (~8 Mo par vue en 1080p).
+         */
+        private void checkDeferredReleases() {
+            int pending = UltralightEngine.pendingReleases();
+            if (pending == 0) pass("liberation differee des textures", "file vide");
+            else              fail("liberation differee des textures", pending + " textures jamais liberees");
+        }
+
+        private void ctrl(int key) {
+            panel.keyPressed(key, InputConstants.MOD_CONTROL);
+            panel.keyReleased(key, InputConstants.MOD_CONTROL);
+        }
+
+        /**
+         * Deux volets, pour ne pas dependre du clavier du poste de test : la table doit traduire
+         * un A AZERTY (position Q, nom "a") en VK_A, et le chemin reel doit suivre la disposition
+         * active, quelle qu'elle soit (65 en AZERTY, 81 en QWERTY).
+         */
+        private void checkLayoutLetter() {
+            String what = "lettre selon la disposition (A AZERTY)";
+            int simulated = UltralightBrowserView.toWindowsVK(InputConstants.KEY_Q, "a");
+            if (simulated != 65) { fail(what, "table : Q+\"a\" -> " + simulated + " (attendu 65)"); return; }
+            String name = GLFW.glfwGetKeyName(InputConstants.KEY_Q, GLFW.glfwGetKeyScancode(InputConstants.KEY_Q));
+            int expected = UltralightBrowserView.toWindowsVK(InputConstants.KEY_Q, name);
+            String code = field(last("key"), "code");
+            if (String.valueOf(expected).equals(code)) {
+                pass(what, "table Q+\"a\" -> 65, frappe reelle Q physique (\"" + name + "\" ici) -> keyCode " + code);
+            } else {
+                fail(what, "frappe reelle : keyCode " + code + " (attendu " + expected + " pour \"" + name + "\")");
+            }
+        }
+
+        private void checkKeyCode(String what, int expected) {
+            String ev = last("key");
+            String code = field(ev, "code");
+            if (String.valueOf(expected).equals(code)) pass(what, "keyCode " + code);
+            else                                       fail(what, "keyCode " + code + " (attendu " + expected + ")");
+        }
+
+        /** Un appel depuis un autre thread doit lever une exception AVANT tout appel natif. */
+        private void checkThreadGuard() {
+            Throwable[] got = { null };
+            Thread t = new Thread(() -> {
+                try { panel.view().focus(); } catch (Throwable e) { got[0] = e; }
+            }, "ul-probe-autre-thread");
+            t.start();
+            try { t.join(2000); } catch (InterruptedException ignored) { }
+            if (got[0] instanceof IllegalStateException) pass("garde de thread", "refuse hors render thread");
+            else                                         fail("garde de thread", "recu " + got[0]);
+        }
+
+        private void startAnimPanel() {
+            animPanel = UltralightPanel.builder()
+                    .design(640, 360)
+                    .bounds(0.6f, 0.6f, 0.35f, 0.35f)
+                    .fit(UltralightPanel.Fit.FILL)
+                    .build();
+            if (perfHtml != null) {
+                animPanel.loadHTML(perfHtml.replace("/*ANIM*/", "startAnimation();"
+                        + "window.__raf=0;(function c(){window.__raf++;requestAnimationFrame(c);})();"));
+            }
+        }
+
+        private int animPaints() {
+            return animPanel.view() == null ? 0 : animPanel.view().paintCount;
+        }
+
+        private int animRaf() {
+            if (animPanel.view() == null) return 0;
+            double v = num(animPanel.view().evalString("window.__raf||0"));
+            return Double.isNaN(v) ? 0 : (int) v;
+        }
+
+        /**
+         * Avec animated(), l'animation JS doit tourner ET chacune de ses frames doit atteindre
+         * l'ecran. On compare aux frames JS, pas aux frames du jeu : Ultralight cadence
+         * requestAnimationFrame a ~60 Hz, quel que soit le taux de rafraichissement de Minecraft.
+         */
+        private void checkAnimated() {
+            int paints = animPaints() - animPaints1;
+            int raf = animRaf() - animRaf1;
+            String detail = raf + " frames JS, " + paints + " peintures sur 120 frames de jeu";
+            if (raf >= 30 && paints >= raf * 0.8) pass("page animee avec animated()", detail);
+            else                                  fail("page animee avec animated()", detail);
+            animPanel.close();
+            animPanel = null;
+        }
+
+        /** Les messages de la page doivent arriver par le signal, jamais par le vidage de secours. */
+        private void checkBridgeSignal() {
+            UltralightBrowserView v = panel.view();
+            if (v == null) { fail("pont JS sur signal", "pas de vue"); return; }
+            if (v.bridgeFallbackCatches == 0 && v.bridgeSignalDrains > 0) {
+                pass("pont JS sur signal", v.bridgeSignalDrains + " vidages sur signal, 0 rattrapage");
+            } else {
+                fail("pont JS sur signal", v.bridgeSignalDrains + " vidages sur signal, "
+                        + v.bridgeFallbackCatches + " rattrapage(s) par le secours");
+            }
         }
 
         /**
@@ -329,6 +544,58 @@ final class UltralightPanelProbe {
                 fail("un seul pompage par frame",
                         pumps + " cycles pour " + rendered + " frames rendues"
                         + (pumps > rendered * 1.5 ? " (init() n'est pas idempotent)" : ""));
+            }
+        }
+
+        /**
+         * Ouvre la page de saisie et attend une frappe HUMAINE. La phase input tape en
+         * synthetique, ce qui contourne le chemin clavier GLFW de Minecraft : seule une vraie
+         * frappe prouve que charTyped et keyPressed(KeyEvent) arrivent bien a la page, disposition
+         * du clavier comprise (AZERTY : taper "azq" doit donner "azq").
+         */
+        private void startTypingPhase() {
+            typingPhase = true;
+            lastTyped = "";
+            panel = UltralightPanel.builder()
+                    .design(1280, 720)
+                    .fit(UltralightPanel.Fit.CONTAIN)
+                    .build();
+            if (inputHtml != null) panel.loadHTML(inputHtml);
+            panel.focus();
+            frames = 0;
+            LOG.info("[ul-panelprobe] phase TYPING : clique dans le champ texte, puis tape au clavier.");
+            LOG.info("[ul-panelprobe] (le champ est a ~250,220 en CSS ; la sonde s'arrete des que 3 caracteres arrivent)");
+        }
+
+        private void typingTick() {
+            if (!UltralightEngine.isReady() || panel.view() == null) return;
+            frames++;
+
+            // Au demarrage, on place le curseur dans le champ pour que l'humain n'ait qu'a taper.
+            if (frames == 60) {
+                panel.mouseMoved(logX(250), logY(220));
+                panel.mouseClicked(logX(250), logY(220), GLFW.GLFW_MOUSE_BUTTON_LEFT);
+                panel.mouseReleased(logX(250), logY(220), GLFW.GLFW_MOUSE_BUTTON_LEFT);
+                LOG.info("[ul-panelprobe] champ focalise (hasInputFocus={}), a toi de taper.",
+                        panel.hasInputFocus());
+            }
+
+            if (frames % 20 != 0) return;
+            String v = panel.view().evalString("document.getElementById('txt').value");
+            if (v == null) v = "";
+            if (!v.equals(lastTyped)) {
+                lastTyped = v;
+                LOG.info("[ul-panelprobe] champ = \"{}\"", v);
+            }
+            if (v.length() >= 3) {
+                pass("saisie clavier REELLE (chemin GLFW)", "recu \"" + v + "\"");
+                report();
+                finish();
+            } else if (frames > 12000) {  // ~3 min : le temps 'un humain tape
+                fail("saisie clavier REELLE (chemin GLFW)",
+                        "rien recu en ~3 min (frappe humaine requise)");
+                report();
+                finish();
             }
         }
 
@@ -454,7 +721,9 @@ final class UltralightPanelProbe {
 
             if (panel == null) return;
             panel.render(graphics);
+            if (animPanel != null) animPanel.render(graphics);
 
+            if (typingPhase) { typingTick(); return; }
             if (inputPhase) { inputTick(); return; }
 
             if (!UltralightEngine.isReady()) return;   // init native en cours : on ne compte pas
@@ -529,6 +798,9 @@ final class UltralightPanelProbe {
                 UltralightPanel.Builder b = UltralightPanel.builder().design(1280, 720);
                 if (!c.fullScreen()) b.bounds(0.25f, 0.25f, 0.5f, 0.5f);
                 panel = b.fit(UltralightPanel.Fit.FILL).build();
+                // Un consommateur reel pose toujours un handler : sans lui le drain du pont sort
+                // tout de suite et son cout n'apparaitrait pas dans la mesure.
+                panel.setQueryHandler(msg -> { });
                 String page = perfHtml == null ? null
                         : (c.animated() ? perfHtml.replace("/*ANIM*/", "startAnimation();") : perfHtml);
                 if (page != null) panel.loadHTML(page);
@@ -566,17 +838,45 @@ final class UltralightPanelProbe {
             double p95  = sorted.get((int) (sorted.size() * 0.95)) / 1e6;
             PerfCase c = PERF_CASES[perfCase];
             String pump = c.withPanel()
-                    ? String.format(java.util.Locale.ROOT, " - cycle moteur %.2f ms/frame",
-                                    UltralightEngine.perfAverageMicros() / 1000.0)
+                    ? String.format(java.util.Locale.ROOT, " - cycle moteur %.2f ms/frame (dont pont JS %.1f us)",
+                                    UltralightEngine.perfAverageMicros() / 1000.0,
+                                    UltralightEngine.perfBridgeAverageMicros())
                     : "";
             LOG.info(String.format(java.util.Locale.ROOT,
                     "[ul-panelprobe]   [tour %d] %-28s frame %.2f ms (%.0f FPS) - p95 %.2f ms%s",
                     perfRound + 1, c.label(), mean, 1000.0 / mean, p95, pump));
         }
 
+        /** Trace ce que Minecraft livre a l'ecran, pour distinguer "GLFW ne produit rien" de
+         *  "la page ne recoit pas". */
+        @Override
+        public boolean charTyped(net.minecraft.client.input.CharacterEvent input) {
+            if (typingPhase) {
+                LOG.info("[ul-panelprobe] MC -> ecran : charTyped \"{}\"", input.codepointAsString());
+                if (panel != null) panel.charTyped(input.codepointAsString());
+                return true;
+            }
+            return super.charTyped(input);
+        }
+
+        @Override
+        public boolean keyPressed(net.minecraft.client.input.KeyEvent key) {
+            if (typingPhase) {
+                String name = null;
+                try { name = GLFW.glfwGetKeyName(key.key(), key.scancode()); } catch (Throwable ignored) { }
+                LOG.info("[ul-panelprobe] MC -> ecran : keyPressed code={} scancode={} nom={} -> VK {} mods={}",
+                        key.key(), key.scancode(), name,
+                        UltralightBrowserView.toWindowsVK(key.key(), name), key.modifiers());
+                if (panel != null) panel.keyPressed(key);
+                return true;
+            }
+            return super.keyPressed(key);
+        }
+
         @Override
         public void removed() {
             if (panel != null) { panel.close(); panel = null; }
+            if (animPanel != null) { animPanel.close(); animPanel = null; }
         }
 
         @Override public boolean shouldCloseOnEsc() { return false; }
