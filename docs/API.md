@@ -2,12 +2,101 @@
 
 Mod-API Fabric (client, MC 26.2) qui rend du HTML/CSS/JS dans une texture Minecraft
 via **Ultralight 1.4 (WebKit 615, ≈ Safari 16.4)** (binding Luminescence). Conçu pour être
-consommé par un autre mod via `mavenLocal()`.
+consommé par un autre mod.
+
+Ce document décrit la **2.1.0**, branche `26.2`. Pour Minecraft 26.3, voir la branche `26.3`
+(3.1.0) et l'encadré « Différences avec la 3.1.0 » ci-dessous.
+
+## Consommer depuis un autre mod
+
+### Versions
+
+| Version du mod | Minecraft | Branche | État |
+|---|---|---|---|
+| 3.1.0 | 26.3 | `26.3` | maintenue |
+| **2.1.0-SNAPSHOT** | **26.2** | `26.2` | rétroportage des apports de la 3.1 qui ne dépendent pas de 26.3 |
+| 2.0.0 | 26.2 | `26.2` | remplacée par 2.1.0 (compatible) |
+| 1.x | 1.21.11 | `main` | gelée |
+
+Une version ne tourne que sur **son** Minecraft : `fabric.mod.json` déclare `~26.2`, le jeu
+refuse de démarrer sur une autre version.
+
+### Dépendance Gradle
+
+L'artefact n'est pas sur un dépôt public : il se publie dans le Maven local depuis ce dépôt.
+
+```bash
+./gradlew publishToMavenLocal      # côté ultralight, branche 26.2
+```
+
+```gradle
+repositories {
+    mavenLocal()
+    // + les dépôts habituels (maven.fabricmc.net, mavenCentral)
+}
+dependencies {
+    implementation "net.ostore:ultralight:2.1.0-SNAPSHOT"
+}
+```
+
+- **`implementation`, pas `modImplementation`** : MC 26.x n'est plus obfusqué, il n'y a plus de
+  remap.
+- Luminescence (`io.github.ayydxn:luminescence`) n'est publiée sur aucun dépôt public. Elle est
+  résolue depuis le Maven local, où `scripts/install-luminescence.ps1` l'installe. Sur une autre
+  machine, lancer ce script une fois avant de compiler le mod consommateur.
+- Un `-SNAPSHOT` est mis en cache par Gradle : après une republication, `--refresh-dependencies`.
+
+Et dans le `fabric.mod.json` du mod consommateur :
+
+```json
+"depends": { "ultralight": ">=2.1.0-" }
+```
+
+(Le `-` final fait accepter les préversions comme `2.1.0-SNAPSHOT` par Fabric Loader.)
+
+### À lire avant d'écrire la moindre ligne
+
+1. **Utiliser `UltralightPanel`** (§3), pas `UltralightBrowserView` à la main. C'est lui qui
+   empêche une interface de casser selon le ratio d'écran.
+2. **Ne jamais pomper le moteur soi-même.** Il tourne seul à chaque frame. Dans
+   `extractRenderState` ou un `HudElement`, on ne fait que `panel.render(graphics)` (voir §1).
+3. **Ne jamais coder en dur des codes de touche ou de bouton** : les comparer aux constantes de
+   `com.mojang.blaze3d.platform.InputConstants`. Ils valent les codes GLFW en 26.2, mais ce ne
+   sera plus vrai en 26.3 (encadré ci-dessous).
+4. **Fermer ce qu'on ouvre** : `panel.close()` dans `Screen.removed()`.
+5. **Page animée ? `.animated(true)`** sur le panneau (§3). Sans lui, une animation CSS ou
+   `requestAnimationFrame` ne tourne tout simplement pas.
+6. **Clavier : `panel.keyPressed(key)`** avec le `KeyEvent` complet, plutôt que les codes entiers :
+   c'est la seule forme qui respecte la disposition du clavier (en AZERTY, l'autre envoie Ctrl+Q
+   pour Ctrl+A, et un formulaire qui écoute `event.keyCode` voit un Q pour un A).
+
+> ### Différences avec la 3.1.0 (Minecraft 26.3)
+>
+> Le même code consommateur compile sur les deux branches **si** il suit les six règles
+> ci-dessus. Ce qui diffère :
+>
+> | | 2.1.0 (26.2) | 3.1.0 (26.3) |
+> |---|---|---|
+> | Codes de bouton | GLFW : gauche/droit/milieu = **0/1/2** | SDL : gauche/milieu/droite = **1/2/3** |
+> | Codes de touche | GLFW, alignés sur l'ASCII (A = 65, Entrée = 257) | scancodes SDL (A = 4, Entrée = 40) |
+> | Disposition dans `keyPressed(KeyEvent)` | lue par `glfwGetKeyName(key, scancode)` | lue dans `KeyEvent.keycode()` |
+> | Curseurs | `setCursorHandler(IntConsumer)` reçoit une forme GLFW (`GLFW_HAND_CURSOR`…) et **le mod applique** le curseur | `setCursorHandler(Consumer<CursorType>)`, facultatif : la vue applique seule |
+> | `TextInputManager` | n'existe pas, rien à faire | la vue le prévient du focus texte |
+> | Pompage du moteur | `LevelRenderEvents.START_MAIN` | `LevelExtractionEvents.END_EXTRACTION` |
+> | Texture | `com.mojang.blaze3d.textures.GpuTexture` | `com.mojang.renderpearl.api.textures.GpuTexture` |
+>
+> Noms de méthodes identiques par ailleurs : `keyPressed/keyReleased(KeyEvent)`,
+> `animated()`/`setAnimated()`, `requestRepaint()`, `renderFrame()`, `setBridgeName()`. Seul le
+> paramètre de `setCursorHandler` change de type.
+
+---
 
 > **Contrainte absolue : tout doit s'exécuter sur le render thread du client.**
-> Le binding JNI met en cache le `JNIEnv` du thread d'init ; un appel depuis un
-> autre thread = corruption mémoire native. En pratique : appelle l'API depuis le rendu
-> (HUD, `Screen.render`, callbacks MC marshalés via `MinecraftClient.execute`).
+> Le binding JNI n'est pas thread-safe : un appel depuis un autre thread corromprait la mémoire
+> native. Depuis la 2.1.0, un tel appel lève immédiatement une `IllegalStateException` qui nomme
+> le thread fautif. En pratique : appelle l'API depuis le rendu, les écrans, les ticks client, et
+> reviens sur le bon thread avec `Minecraft.getInstance().execute(...)` (réponse réseau, tâche
+> asynchrone).
 
 ---
 
@@ -17,7 +106,7 @@ consommé par un autre mod via `mavenLocal()`.
 |---|---|
 | `static void init()` | À appeler dans `onInitializeClient`. Enregistre le pilote de frame (`LevelRenderEvents.START_MAIN`, par frame et **avant** la GUI) ; l'init native (plateforme + renderer) est **différée au 1er frame** (fenêtre/GL prêtes). |
 | `static boolean isReady()` | Le moteur est-il prêt. |
-| `static void renderFrame()` | **Pompe un cycle** update/render/paint des vues actives. Normalement **inutile** : le moteur se pompe seul à chaque frame. Ne jamais l'appeler depuis une phase d'extraction de la GUI (voir l'encadré ci-dessous). |
+| `static void renderFrame()` | **Pompe un cycle** update/render/paint des vues actives. Normalement **inutile** : le moteur se pompe seul à chaque frame en jeu. Seul usage légitime : faire vivre une vue hors monde, depuis un tick client. Depuis la 2.1.0, l'appel est **ignoré** pendant l'extraction de la GUI (avec un avertissement et la pile de l'appelant) et en jeu (le moteur est déjà pompé). |
 
 En jeu, les vues se mettent à jour seules, écran ouvert ou non.
 
@@ -81,7 +170,14 @@ Côté Java :
 view.setQueryHandler(msg -> { /* msg = la string passée à ulQuery, sur le render thread */ });
 view.updateQueryHandler(handler);              // remplace le handler sans recréer la vue
 ```
-Pas de polling, pas de latence (callback natif JavaScriptCore).
+Le handler est appelé sur le render thread, au plus tard à la frame suivant l'appel de la page.
+
+Sous le capot, Luminescence 1.4 ne remonte pas les appels de fonction natifs initiés par la page :
+`ulQuery` empile donc les messages dans une file JS que la bibliothèque vide. Depuis la 2.1.0,
+elle ne la vide que quand la page signale un message (auparavant : à chaque frame et pour chaque
+vue, soit ~90 µs par frame et par vue même sans aucun message). Un vidage de secours tourne toutes
+les 30 frames ; s'il rattrape un message, c'est que le signal ne passe plus, et un avertissement le
+dit.
 
 ### Cycle de page
 ```java
@@ -89,18 +185,32 @@ view.setOnPageReadyCallback(v -> { /* DOM prêt (onDOMReady), marshalé sur le t
 boolean ready = view.isPageReady();
 ```
 
-### Input (codes GLFW = ceux de MC)
+### Input (codes GLFW, ceux que MC 26.2 fournit)
 | Méthode | Notes |
 |---|---|
 | `mouseMoved(int x, int y)` | Coords en **pixels CSS** de la vue (voir le piège §4). |
-| `mousePressed(int x, int y, int glfwButton)` | `glfwButton` : `GLFW_MOUSE_BUTTON_LEFT/RIGHT/MIDDLE`. |
+| `mousePressed(int x, int y, int glfwButton)` | `InputConstants.MOUSE_BUTTON_LEFT/RIGHT/MIDDLE` (= GLFW 0/1/2). |
 | `mouseReleased(int x, int y, int glfwButton)` | |
 | `scroll(int deltaXpx, int deltaYpx)` | Défilement en pixels. |
-| `charTyped(String text)` | Saisie de texte (événement CHAR). |
-| `keyPressed(int glfwKey, int glfwMods)` | Touches d'édition/navigation/raccourcis (mapping GLFW→VK interne). |
+| `charTyped(String text)` | Saisie de texte (événement CHAR). C'est lui qui insère les caractères, accents et chiffres AZERTY compris. |
+| `keyPressed(KeyEvent)` / `keyReleased(KeyEvent)` | **Forme recommandée** (2.1.0) : l'événement tel que reçu par le `Screen`. Les lettres suivent la disposition du clavier (AZERTY compris, via `glfwGetKeyName`), donc les raccourcis et `event.keyCode` côté page sont justes. |
+| `keyPressed(int glfwKey, int glfwMods)` | Codes GLFW, donc des **positions** (clavier US) : en AZERTY, A arrive comme Q. Conservée pour compatibilité et pour les frappes synthétiques. |
 | `keyReleased(int glfwKey, int glfwMods)` | |
 | `focus()` / `unfocus()` | Donne/retire le focus clavier à la vue. |
 | `boolean hasInputFocus()` | `true` si un élément éditable (`<input>`…) a le focus. |
+
+Touches transmises (2.1.0) : lettres, chiffres, F1 à F24, pavé numérique (chiffres, opérateurs,
+Entrée, avec l'indicateur « keypad »), ponctuation, touche `<>` des claviers ISO, flèches et
+touches d'édition, modificateurs seuls, Verr. Maj, Verr. Num. En 2.0.0, ces touches arrivaient à la
+page avec un `keyCode` arbitraire (le code GLFW brut, F1 = 290). Une touche inconnue arrive
+désormais avec `keyCode` 0. **Copier-coller** : Ctrl+C / Ctrl+V dans une page passent par le
+presse-papiers de Minecraft, donc celui du système.
+
+> **Saisie de motifs ou de numéros en AZERTY.** Le texte tapé passe par `charTyped`, qui reçoit
+> le caractère produit par le système : `&é"'(` sur la rangée du haut sans Maj, `12345` avec. Le
+> `keyCode` d'un chiffre suit en revanche la **position** (VK_1 pour la touche `&1`), comme sous
+> Windows. Un formulaire qui filtre les chiffres doit donc lire `event.key` ou la valeur du champ,
+> pas `event.keyCode`.
 
 ### Curseurs
 ```java
@@ -108,6 +218,9 @@ view.setCursorHandler(glfwShape -> GLFW.glfwSetCursor(windowHandle, standardCurs
 ```
 Le handler reçoit une **forme de curseur GLFW** (`GLFW_HAND_CURSOR`, `GLFW_IBEAM_CURSOR`,
 `GLFW_ARROW_CURSOR`, redimensionnement…). Remets `glfwSetCursor(handle, 0L)` à la fermeture.
+
+Inchangé en 2.1.0 : en 26.2 c'est **toujours au mod** d'appliquer le curseur. Le passage au jeu de
+curseurs vanilla appliqué par la vue elle-même est propre à la 3.x (26.3), voir l'encadré en tête.
 
 ---
 
@@ -178,7 +291,10 @@ panel.setPreviewAspect(21.0 / 9.0);   // simule un 21:9 dans la fenêtre actuell
 |---|---|
 | `render(graphics)` | depuis `Screen.extractRenderState` **ou** un `HudElement` : géométrie + dessin. Ne pompe pas le moteur. |
 | `mouseMoved/mouseClicked/mouseReleased/mouseScrolled(...)` | coordonnées **logiques MC** ; renvoie `false` hors du panneau |
-| `keyPressed/keyReleased(glfwKey, mods)`, `charTyped(text)` | identiques à la vue |
+| `keyPressed/keyReleased(KeyEvent)`, `charTyped(text)` | identiques à la vue ; passer l'événement du `Screen` tel quel |
+| `keyPressed/keyReleased(glfwKey, mods)` | forme à codes entiers, positions physiques (voir la vue) |
+| `animated(bool)` *(builder)*, `setAnimated(bool)` | page animée : repeinte à chaque frame. Sans lui, une animation se fige (et `requestAnimationFrame` ne tourne pas). Coût : une re-rastérisation par frame. |
+| `requestRepaint()` | force quelques frames de repeinture (après une mise à jour par `executeJavaScript`, par exemple) ; pour une animation continue, préférer `animated` |
 | `focus()` / `unfocus()` / `hasInputFocus()` | focus clavier |
 | `contains(x, y)`, `drawX/drawY/drawWidth/drawHeight()` | rectangle occupé, en px logiques |
 | `cssWidth()` / `cssHeight()` | viewport CSS courant |
@@ -186,7 +302,7 @@ panel.setPreviewAspect(21.0 / 9.0);   // simule un 21:9 dans la fenêtre actuell
 | `maxViewPixels(n)` *(builder)* | plafond de résolution (défaut 3840×2160) |
 | `bridgeName(nom)` *(builder)* | nom de la fonction de pont, propre à ce panneau |
 | `view()` | la `UltralightBrowserView` sous-jacente |
-| `close()` | libère tout |
+| `close()` | libère tout (la texture au tick client suivant, pour ne pas détruire une texture encore référencée par la frame en cours). Au-delà de 8 vues ouvertes en même temps, la bibliothèque avertit (≈16 Mo chacune en 1080p) : c'est presque toujours une vue jamais fermée. |
 
 ---
 
@@ -206,11 +322,14 @@ la règle « rien sur le GPU pendant l'extraction ».
 | `-Dultralight.panelprobe=true` / `ULTRALIGHT_PANELPROBE=true` | arme la sonde ; elle attend que tu sois en jeu |
 | `ULTRALIGHT_PANELPROBE_WORLD=<dossier>` | charge cette sauvegarde au lieu d'attendre |
 | `ULTRALIGHT_PANELPROBE_QUIT=true` | quitte le jeu à la fin (run automatisé) |
-| `ULTRALIGHT_PANELPROBE_MODE=geometry\|input\|perf\|all` | phases à jouer (défaut `all`) |
+| `ULTRALIGHT_PANELPROBE_MODE=geometry\|input\|perf\|all\|typing` | phases à jouer (défaut `all` ; `typing` est manuel et jamais inclus dans `all`) |
 
 La phase **input** injecte de vrais événements à des positions CSS connues et vérifie ce que la
 page a reçu : mapping des coordonnées, cible du clic, hit-test hors panneau, saisie texte, focus,
-curseurs, molette. La phase **perf** compare le temps de frame avec et sans overlay ; couper la
+curseurs, molette, puis (2.1.0) pompage unique, pont JS sur signal, libération différée des
+textures, garde de thread, copier, coller, touches F2 et virgule, lettre A en AZERTY et page
+animée : 23 vérifications. La phase **typing** attend une frappe humaine dans un champ et trace,
+pour chaque touche, le code GLFW, le scancode, le nom donné par la disposition et le VK envoyé. La phase **perf** compare le temps de frame avec et sans overlay ; couper la
 synchro verticale et relever `maxFps` avant de la lancer, sinon la mesure est plafonnée.
 
 Sans le premier drapeau, **aucun écouteur n'est enregistré** : coût nul dans un jar publié.
@@ -230,10 +349,13 @@ Perf : en CPU mode, éviter les animations plein écran continues + `backdrop-fi
 - **Désactivation manuelle** : `-Dultralight.disable=true` (ou `ULTRALIGHT_DISABLE=true`) coupe
   totalement le rendu HTML — aucun natif n'est téléchargé ni chargé. `UltralightEngine.isReady()`
   reste `false` ; les mods consommateurs doivent le vérifier avant d'ouvrir une vue.
-- **Garde-fou AVX** : les natifs WebKit 615 sont compilés avec AVX. Sur un CPU sans AVX (Intel
-  pré-2011 / AMD pré-Bulldozer), la 1re instruction AVX lèverait un `SIGILL` natif = crash JVM dur.
-  Le moteur détecte l'absence d'AVX (flag HotSpot `UseAVX`) et **désactive le rendu HTML** au lieu
-  de crasher. Forçage (tests) : `-Dultralight.skipCpuCheck=true`.
+- **Garde-fou AVX2** : les natifs WebKit 615 utilisent des instructions **AVX2**. Sur un CPU sans
+  AVX2 (Intel Ivy Bridge et antérieurs, AMD antérieurs à Excavator), la première lèverait un
+  `SIGILL` natif, donc un crash JVM impossible à rattraper. Le moteur lit le flag HotSpot `UseAVX`
+  (≥ 2 requis) et **désactive le rendu HTML** au lieu de crasher. Forçage (tests) :
+  `-Dultralight.skipCpuCheck=true`.
+- **Logs du moteur** (2.1.0) : les messages internes d'Ultralight arrivent dans le log de
+  Minecraft sous `ultralight/native` (erreurs et avertissements visibles, le reste en debug).
 
 ---
 

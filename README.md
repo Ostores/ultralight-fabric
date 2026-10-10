@@ -86,6 +86,11 @@ sur la release `natives-1.4.0`.
 
 ## API (mods consommateurs)
 
+> **Dépendance, versions, et les pièges à connaître avant d'écrire la moindre ligne** (ne jamais
+> pomper le moteur soi-même, codes de touche, différences avec la 3.1.0 de 26.3) : section
+> **[Consommer depuis un autre mod](docs/API.md#consommer-depuis-un-autre-mod)** de `docs/API.md`.
+> Coordonnées : `net.ostore:ultralight:2.1.0-SNAPSHOT` via `mavenLocal()`, en `implementation`.
+
 `UltralightEngine.init()` dans `onInitializeClient`, puis **`UltralightPanel`** : il possède la
 géométrie (taille de vue, `deviceScale`, rectangle de dessin, conversion des coordonnées souris)
 et suit la fenêtre tout seul.
@@ -96,7 +101,8 @@ panel = UltralightPanel.builder()
         .fit(UltralightPanel.Fit.FILL_CLAMPED)    // défaut
         .build();
 panel.loadHTML(html);
-// Screen.extractRenderState : panel.renderInScreen(graphics);
+// Screen.extractRenderState : panel.render(graphics);   // dessin seulement, le moteur tourne seul
+// Screen.keyPressed(KeyEvent key) : panel.keyPressed(key);   // disposition AZERTY respectée
 ```
 
 Trois politiques de mise en page, pour que les interfaces ne cassent plus selon le **ratio
