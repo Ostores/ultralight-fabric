@@ -10,9 +10,10 @@ consommé par un autre mod.
 
 | Version du mod | Minecraft | Branche | État |
 |---|---|---|---|
-| **3.1.0** | **26.3** | `26.3` | maintenue |
-| 3.0.0 | 26.3 | `26.3` | remplacée par 3.1.0 (compatible) |
-| 2.0.0 | 26.2 | `26.2` | gelée |
+| **3.1.1** | **26.3** | `26.3` | maintenue |
+| 3.1.0, 3.0.0 | 26.3 | `26.3` | remplacées par 3.1.1 (compatible) |
+| 2.1.0-SNAPSHOT | 26.2 | `26.2` | maintenue : rétroportage des 3.0.0 et 3.1.0, plancher d'échelle compris |
+| 2.0.0 | 26.2 | `26.2` | remplacée par 2.1.0 (compatible) |
 | 1.x | 1.21.11 | `main` | gelée |
 
 Une version ne tourne que sur **son** Minecraft : `fabric.mod.json` déclare `~26.3`, le jeu
@@ -32,7 +33,7 @@ repositories {
     // + les dépôts habituels (maven.fabricmc.net, mavenCentral)
 }
 dependencies {
-    implementation "net.ostore:ultralight:3.1.0"
+    implementation "net.ostore:ultralight:3.1.1"
 }
 ```
 
@@ -46,7 +47,7 @@ dependencies {
 Et dans le `fabric.mod.json` du mod consommateur :
 
 ```json
-"depends": { "ultralight": ">=3.1.0" }
+"depends": { "ultralight": ">=3.1.1" }
 ```
 
 ### À lire avant d'écrire la moindre ligne

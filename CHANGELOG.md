@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.1.1 : Minecraft 26.3
+
+### Correction
+
+- **Plancher d'échelle à 1.** Quand la taille de design dépasse la fenêtre (deviceScale sous 1),
+  le rendu CPU d'Ultralight 1.4 ne peignait qu'une partie de la page. Vérifié en jeu : design
+  3840×2160 en plein écran 1080p, donc une échelle de 0,5, et seul le quart haut gauche de la page
+  était peint, le reste vide. Même défaut vu en 26.2 à 0,44 (texte et blocs absents). La vue est
+  désormais peinte à sa taille CSS avec une échelle de 1, et la carte graphique la réduit : le
+  rectangle affiché et la souris ne changent pas. Le plafond `maxViewPixels` passe après ce
+  plancher. La ligne `[ul-panel]` donne aussi la taille affichée.
+
+Touche tout joueur dont la fenêtre est plus petite que la taille de design d'une interface (par
+exemple un design 1920×1080 joué en 1280×720).
+
+### Sonde
+
+Étape de géométrie « échelle sous 1 » (design 3840×2160), avec capture d'écran.
+
+---
+
 ## 3.1.0 : Minecraft 26.3
 
 Compatible avec la 3.0.0 : rien à changer pour continuer à compiler. Deux nouveautés méritent
