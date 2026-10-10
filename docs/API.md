@@ -13,8 +13,8 @@ Ce document décrit la **2.1.0**, branche `26.2`. Pour Minecraft 26.3, voir la b
 
 | Version du mod | Minecraft | Branche | État |
 |---|---|---|---|
-| 3.1.0 | 26.3 | `26.3` | maintenue |
-| **2.1.0-SNAPSHOT** | **26.2** | `26.2` | rétroportage des apports de la 3.1 qui ne dépendent pas de 26.3 |
+| 3.1.1 | 26.3 | `26.3` | maintenue |
+| **2.1.0-SNAPSHOT** | **26.2** | `26.2` | maintenue : rétroportage des 3.0.0 et 3.1.0 qui ne dépendent pas de 26.3 |
 | 2.0.0 | 26.2 | `26.2` | remplacée par 2.1.0 (compatible) |
 | 1.x | 1.21.11 | `main` | gelée |
 
