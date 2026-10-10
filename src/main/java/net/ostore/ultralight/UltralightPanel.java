@@ -336,8 +336,21 @@ public final class UltralightPanel implements AutoCloseable {
             }
         }
 
+        // Taille affichée, avant de choisir la finesse du rendu : le rectangle de dessin et la
+        // souris s'y rapportent, quelle que soit la taille de la texture.
+        double dispPW = vpw, dispPH = vph;
+
+        // Plancher d'échelle : sous un deviceScale de 1, le rendu CPU d'Ultralight 1.4 perd des
+        // couches entières. Vu en 26.2 à 0,44 (fond et logo peints, ni texte ni blocs) et en 26.3
+        // à 0,5 (seul le quart haut gauche de la page peint). On peint donc la page à sa taille CSS
+        // et la carte graphique la réduit.
+        if (scale < 1.0) {
+            vpw /= scale; vph /= scale; scale = 1.0;
+        }
+
         // Plafond de résolution : on baisse vue ET deviceScale du même facteur, le viewport CSS
-        // reste identique — seule la finesse du rendu diminue.
+        // reste identique, seule la finesse du rendu diminue. Il passe après le plancher : une page
+        // plus grande que le plafond retombe sous l'échelle 1, mieux vaut ça qu'une texture géante.
         if (maxViewPixels > 0) {
             double px = vpw * vph;
             if (px > maxViewPixels) {
@@ -351,10 +364,10 @@ public final class UltralightPanel implements AutoCloseable {
 
         // Rectangle de dessin : la vue est centrée dans sa zone, converti en px logiques.
         double pxPerGuiX = (double) fbW / guiW, pxPerGuiY = (double) fbH / guiH;
-        drawX = (int) Math.round((areaPX + (areaPW - newPW) / 2.0) / pxPerGuiX);
-        drawY = (int) Math.round((areaPY + (areaPH - newPH) / 2.0) / pxPerGuiY);
-        drawW = Math.max(1, (int) Math.round(newPW / pxPerGuiX));
-        drawH = Math.max(1, (int) Math.round(newPH / pxPerGuiY));
+        drawX = (int) Math.round((areaPX + (areaPW - dispPW) / 2.0) / pxPerGuiX);
+        drawY = (int) Math.round((areaPY + (areaPH - dispPH) / 2.0) / pxPerGuiY);
+        drawW = Math.max(1, (int) Math.round(dispPW / pxPerGuiX));
+        drawH = Math.max(1, (int) Math.round(dispPH / pxPerGuiY));
         areaW = Math.max(1, (int) Math.round(areaPW / pxPerGuiX));
         areaH = Math.max(1, (int) Math.round(areaPH / pxPerGuiY));
 
@@ -449,8 +462,8 @@ public final class UltralightPanel implements AutoCloseable {
         } else if (fit == Fit.FILL_CLAMPED && cssW <= minCssW) {
             note.append(" · échelle réduite (largeur CSS minimale ").append(minCssW).append(" atteinte)");
         }
-        LOG.info("[ul-panel] fit={} · vue {}×{} px · viewport CSS {}×{} · deviceScale {} (design {}×{}){}",
-                fit, viewPW, viewPH, cssW, cssH,
+        LOG.info("[ul-panel] fit={} · vue {}×{} px · affichée {}×{} · viewport CSS {}×{} · deviceScale {} (design {}×{}){}",
+                fit, viewPW, viewPH, drawW, drawH, cssW, cssH,
                 String.format(java.util.Locale.ROOT, "%.2f", deviceScale), designW, designH, note);
 
         if (fit == Fit.FILL && !warnedUnboundedFill) {

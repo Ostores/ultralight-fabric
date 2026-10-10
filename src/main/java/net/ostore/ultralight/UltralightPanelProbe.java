@@ -151,10 +151,17 @@ final class UltralightPanelProbe {
         mc.setScreenAndShow(instance);
     }
 
-    /** Une étape : politique, ratio simulé éventuel, et bascule de ratio en cours d'étape. */
-    private record Step(String label, UltralightPanel.Fit fit, double previewAspect, double switchTo) {
+    /**
+     * Une étape : politique, ratio simulé éventuel, bascule de ratio en cours d'étape, et taille de
+     * design (1280×720 sauf mention contraire).
+     */
+    private record Step(String label, UltralightPanel.Fit fit, double previewAspect, double switchTo,
+                        int designW, int designH) {
         Step(String label, UltralightPanel.Fit fit, double previewAspect) {
-            this(label, fit, previewAspect, 0);
+            this(label, fit, previewAspect, 0, 1280, 720);
+        }
+        Step(String label, UltralightPanel.Fit fit, double previewAspect, double switchTo) {
+            this(label, fit, previewAspect, switchTo, 1280, 720);
         }
     }
 
@@ -168,6 +175,9 @@ final class UltralightPanelProbe {
                 // Captures juste après un redimensionnement, puis une seconde plus tard.
                 new Step("resize 4:3 -> 21:9",   UltralightPanel.Fit.FILL_CLAMPED, 4.0 / 3.0, 21.0 / 9.0),
                 new Step("resize 21:9 -> 4:3",   UltralightPanel.Fit.FILL_CLAMPED, 21.0 / 9.0, 4.0 / 3.0),
+                // Design plus grand que la fenêtre : échelle sous 1 (0,5 en 1080p). Ultralight 1.4
+                // en rendu CPU y perdait texte et blocs ; la capture doit montrer la page entière.
+                new Step("echelle sous 1 (design 3840x2160)", UltralightPanel.Fit.CONTAIN, 0, 0, 3840, 2160),
         };
 
         private UltralightPanel panel;
@@ -222,7 +232,7 @@ final class UltralightPanelProbe {
             Step s = STEPS[step];
             LOG.info("[ul-panelprobe] etape {}/{} : {}", step + 1, STEPS.length, s.label());
             panel = UltralightPanel.builder()
-                    .design(1280, 720)
+                    .design(s.designW(), s.designH())
                     .fit(s.fit())
                     .build();
             if (s.previewAspect() > 0) panel.setPreviewAspect(s.previewAspect());
